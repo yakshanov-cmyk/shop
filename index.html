@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>ItalBridge — цена в рублях</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+/* ============ НАСТРОЙКИ — меняйте только здесь (см. блок CONFIG в скрипте ниже) ============ */
+:root {
+--bg: var(--tg-theme-bg-color, #ffffff);
+--bg2: var(--tg-theme-secondary-bg-color, #f2f3f5);
+--text: var(--tg-theme-text-color, #16181d);
+--hint: var(--tg-theme-hint-color, #7b8190);
+--accent: var(--tg-theme-button-color, #1f8a4c);
+--accent-text: var(--tg-theme-button-text-color, #ffffff);
+--line: rgba(127,127,127,.22);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg2); color: var(--text);
+font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+.wrap { max-width: 480px; margin: 0 auto; padding: 16px 16px 32px; }
+header { display: flex; align-items: center; gap: 10px; margin: 4px 0 16px; }
+header .flag { font-size: 26px; }
+header h1 { font-size: 20px; margin: 0; }
+header p { margin: 0; color: var(--hint); font-size: 13px; }
+.card { background: var(--bg); border-radius: 14px; padding: 16px; margin-bottom: 12px; }
+.card h2 { font-size: 15px; margin: 0 0 12px; }
+label { display: block; font-size: 13px; color: var(--hint); margin: 10px 0 6px; }
+label:first-of-type { margin-top: 0; }
+input, select, textarea { width: 100%; font: inherit; color: var(--text); background: var(--bg2);
+border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; outline: none; }
+input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+textarea { resize: vertical; min-height: 64px; }
+.eur { position: relative; }
+.eur input { font-size: 22px; font-weight: 600; padding-right: 40px; }
+.eur span { position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+font-size: 20px; color: var(--hint); }
+.result { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
+.row { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; }
+.row .k { color: var(--hint); }
+.row.total { font-size: 20px; font-weight: 700; padding-top: 8px; }
+.row.total .v { color: var(--accent); }
+.note { font-size: 12px; color: var(--hint); margin-top: 8px; }
+.empty { color: var(--hint); font-size: 14px; }
+button { width: 100%; font: inherit; font-weight: 600; border: 0; border-radius: 12px;
+padding: 14px; background: var(--accent); color: var(--accent-text); cursor: pointer; margin-top: 14px; }
+button:disabled { opacity: .45; cursor: default; }
+.steps { margin: 0; padding-left: 20px; font-size: 14px; }
+.steps li { margin: 4px 0; }
+.err { color: #d33; font-size: 13px; margin-top: 8px; display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+<div class="flag">🇮🇹</div>
+<div>
+<h1>ItalBridge</h1>
+<p>Оригинальные бренды из Италии с доставкой по России</p>
+</div>
+</header>
+
+<section class="card" id="product" hidden>
+<h2>🛍 Товар из канала</h2>
+<div id="post"></div>
+<div id="oldprice" class="note" hidden></div>
+</section>
+
+<section class="card">
+<h2>💶 Цена в рублях</h2>
+<label for="eur">Цена товара в евро</label>
+<div class="eur"><input id="eur" type="text" inputmode="decimal" placeholder="99" autocomplete="off"><span>€</span></div>
+
+<label for="cat">Что заказываете</label>
+<select id="cat">
+<option value="1">Одежда, сумки (≈ 1 кг)</option>
+<option value="2">Верхняя одежда, обувь (≈ 2 кг)</option>
+<option value="0.5">Украшения, аксессуары (≈ 0,5 кг)</option>
+</select>
+
+<div class="result" id="result"><div class="empty">Введите цену — посчитаем стоимость под ключ.</div></div>
+</section>
+
+<section class="card">
+<h2>🛍 Оформить заказ</h2>
+<label for="item">Товар: ссылка или описание</label>
+<textarea id="item" placeholder="Например: Coccinelle Arlettis, чёрная — или ссылка на товар"></textarea>
+<label for="size">Размер и цвет</label>
+<input id="size" type="text" placeholder="M, чёрный">
+<label for="city">Город доставки</label>
+<input id="city" type="text" placeholder="Москва">
+<label for="name">Имя и телефон</label>
+<input id="name" type="text" placeholder="Анна, +7 900 000-00-00">
+<div class="err" id="err">Заполните товар, город и контакт.</div>
+<button id="send">Отправить заявку менеджеру</button>
+<p class="note">Откроется чат с менеджером с готовым текстом заявки — останется нажать «Отправить». Фото товара можно приложить там же.</p>
+</section>
+
+<section class="card">
+<h2>ℹ️ Как заказать</h2>
+<ol class="steps">
+<li>Выберите товар в канале или найдите на любом европейском сайте</li>
+<li>Посчитайте цену и отправьте заявку</li>
+<li>Менеджер подтвердит наличие, размер и итоговую цену</li>
+<li>Внесите предоплату — мы выкупим товар и отправим вам</li>
+</ol>
+</section>
+</div>
+
+<script>
+/* ===================== CONFIG — НАСТРОЙКИ ===================== */
+const CONFIG = {
+KURS: 97.2, // ₽ за 1 € — ЗАПАСНОЙ курс. Обычно курс приходит в ссылке (k97d2 / ?k=97.2) и здесь ничего менять не нужно
+NACENKA: 1.10, // +10 %
+FIX: 1500, // фиксированная часть, ₽
+DOSTAVKA_KG: 1500, // доставка, ₽ за 1 кг
+ROUND: 100, // округление вверх до … ₽
+MANAGER: "LanaY777", // ник менеджера в Telegram БЕЗ @
+CHANNEL: "buyitru", // канал, из которого открывают товар
+};
+/* Ссылка под постом: https://t.me/ItalBridgeBot/shop?startapp=p13337_e99_c1_k97d2
+p — номер поста в канале (фото и описание подтянутся сами)
+e — цена в евро (дробная через d: 99d5 = 99,5)
+o — старая цена до скидки, необязательно (o140)
+c — категория: 1 = одежда/сумки, 2 = верхняя одежда/обувь, 05 = аксессуары
+k — курс € Т-Банка на день публикации (97d2 = 97,2) — цена в приложении совпадёт с ценой в посте
+Кнопка меню бота: https://italbridge.github.io/shop/?k=97.2 — курс обновляет бот каждый день */
+/* ============================================================== */
+
+const tg = window.Telegram && window.Telegram.WebApp;
+if (tg) { tg.ready(); tg.expand(); }
+
+const $ = id => document.getElementById(id);
+const rub = n => Math.round(n).toLocaleString("ru-RU").replace(/,/g, " ") + " ₽";
+const ceilTo = (n, step) => Math.ceil(n / step - 1e-9) * step;
+
+function parseEur(s) {
+const v = parseFloat(String(s).replace(/\s/g, "").replace(",", "."));
+return isFinite(v) && v > 0 && v < 100000 ? v : null;
+}
+function okKurs(v) { return isFinite(v) && v > 30 && v < 300 ? v : null; }
+
+/* ---------- параметры из ссылки ---------- */
+function startParam() {
+const fromTg = tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param;
+if (fromTg) return fromTg;
+const q = new URLSearchParams(location.search);
+return q.get("tgWebAppStartParam") || q.get("startapp") || "";
+}
+function parseProduct(s) {
+const out = {};
+String(s).split("_").forEach(part => {
+const k = part.charAt(0), v = part.slice(1);
+if (k === "p" && /^\d+$/.test(v)) out.post = v;
+if (k === "e" && /^\d+(d\d+)?$/.test(v)) out.eur = parseFloat(v.replace("d", "."));
+if (k === "o" && /^\d+(d\d+)?$/.test(v)) out.old = parseFloat(v.replace("d", "."));
+if (k === "c" && ["1", "2", "05"].includes(v)) out.cat = v === "05" ? "0.5" : v;
+if (k === "k" && /^\d+(d\d+)?$/.test(v)) out.kurs = okKurs(parseFloat(v.replace("d", ".")));
+});
+return out;
+}
+let product = parseProduct(startParam());
+const KURS = product.kurs
+|| okKurs(parseFloat(String(new URLSearchParams(location.search).get("k") || "").replace(",", ".")))
+|| CONFIG.KURS;
+
+let last = null;
+function calc() {
+const eur = parseEur($("eur").value);
+const kg = parseFloat($("cat").value);
+if (!eur) {
+last = null;
+$("result").innerHTML = '<div class="empty">Введите цену — посчитаем стоимость под ключ.</div>';
+return;
+}
+const price = ceilTo(eur * KURS * CONFIG.NACENKA + CONFIG.FIX, CONFIG.ROUND);
+const delivery = Math.round(kg * CONFIG.DOSTAVKA_KG);
+last = { eur, price, delivery, total: price + delivery };
+$("result").innerHTML =
+'<div class="row"><span class="k">Товар под ключ</span><span class="v">' + rub(price) + '</span></div>' +
+'<div class="row"><span class="k">Доставка до Москвы (≈ ' + String(kg).replace(".", ",") + ' кг)</span><span class="v">≈ ' + rub(delivery) + '</span></div>' +
+'<div class="row total"><span class="k">Итого</span><span class="v">≈ ' + rub(last.total) + '</span></div>' +
+'<div class="note">Курс на сегодня: 1 € ≈ ' + String(KURS).replace(".", ",") + ' ₽. Точную цену подтвердит менеджер.</div>';
+}
+$("eur").addEventListener("input", calc);
+$("cat").addEventListener("change", calc);
+
+/* ---------- товар из поста ---------- */
+if (product.post || product.eur) {
+$("product").hidden = false;
+if (product.post) {
+const sc = document.createElement("script");
+sc.async = true;
+sc.src = "https://telegram.org/js/telegram-widget.js?22";
+sc.setAttribute("data-telegram-post", CONFIG.CHANNEL + "/" + product.post);
+sc.setAttribute("data-width", "100%");
+sc.setAttribute("data-userpic", "false");
+$("post").appendChild(sc);
+$("item").value = "Товар из поста https://t.me/" + CONFIG.CHANNEL + "/" + product.post;
+}
+if (product.cat) $("cat").value = product.cat;
+if (product.eur) {
+$("eur").value = String(product.eur).replace(".", ",");
+if (product.old && product.old > product.eur) {
+const oldRub = ceilTo(product.old * KURS * CONFIG.NACENKA + CONFIG.FIX, CONFIG.ROUND);
+$("oldprice").hidden = false;
+$("oldprice").innerHTML = "Без скидки: <s>" + rub(oldRub) + "</s> · скидка " +
+Math.round((1 - product.eur / product.old) * 100) + " %";
+}
+}
+calc();
+}
+
+$("send").addEventListener("click", () => {
+const item = $("item").value.trim(), city = $("city").value.trim(), name = $("name").value.trim();
+if (!item || !city || !name) { $("err").style.display = "block"; return; }
+$("err").style.display = "none";
+const lines = ["Здравствуйте! Хочу оформить заказ в ItalBridge.", "", "🛍 Товар: " + item];
+if (last) lines.push("💶 Цена: " + last.eur + " € (≈ " + rub(last.price) + " + доставка ≈ " + rub(last.delivery) + ")");
+if ($("size").value.trim()) lines.push("📏 Размер/цвет: " + $("size").value.trim());
+lines.push("🏙 Город: " + city, "👤 Контакт: " + name);
+const url = "https://t.me/" + CONFIG.MANAGER + "?text=" + encodeURIComponent(lines.join("\n"));
+if (tg && tg.openTelegramLink) tg.openTelegramLink(url);
+else window.open(url, "_blank");
+});
+</script>
+</body>
+</html>
