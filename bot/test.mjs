@@ -24,7 +24,7 @@ const cb = (id, data, message) => hook({ callback_query: { id: "q" + uid, from: 
 const last = (n = 1) => { const s = sent.splice(0); return s.map(x => `${x.method} → ${x.chat_id ?? ""}: ${(x.text || x.callback_query_id && x.text || "").slice(0, 160).replace(/\n/g, " ⏎ ")}${x.reply_markup ? " KB:" + JSON.stringify(x.reply_markup).slice(0, 160) : ""}`).join("\n"); };
 
 await msg(LANA, "/start", {}, "LanaY777"); console.log("1 Лана /start:\n" + last());
-await msg(OWNER, "новый заказ: Coccinelle сумка чёрная; 12 100 ₽; 1500; Анна @anna"); console.log("\n2 новый заказ:\n" + last());
+await msg(OWNER, "новый заказ: Coccinelle сумка чёрная; 12 100 ₽; 1500; Анна @anna"); await cb(OWNER, "nw:ok", { chat: { id: OWNER }, message_id: 1 }); console.log("\n2 новый заказ:\n" + last());
 await msg(OWNER, "новый заказ: Prada кошелёк; 30000"); console.log("\n2b ошибка:\n" + last());
 await cb(OWNER, "st:IB-0001:inv", { chat: { id: OWNER }, message_id: 1, text: "🧾 Заказ IB-0001" }); console.log("\n3 счёт без клиента:\n" + last());
 await msg(CLIENT, "/start IB-0001"); console.log("\n4 клиент привязался:\n" + last());
@@ -45,7 +45,7 @@ const badHook = await worker.fetch(new Request("https://w/tg", { method: "POST",
 await msg(888, "привет"); await msg(888, "ещё раз"); console.log("\n18 незнакомец 2 раза:\n" + last());
 
 // --- регрессия: Выдан после трек-номера и защита от старых кнопок
-await msg(OWNER, "новый заказ: Тест; 1000; Кл"); last();
+await msg(OWNER, "новый заказ: Тест; 1000; Кл"); await cb(OWNER, "nw:ok", { chat: { id: OWNER }, message_id: 1 }); last();
 const id2 = "IB-0002";
 for (const c of ["paid","bought"]) await cb(OWNER, `st:${id2}:${c}`, { chat: { id: OWNER }, message_id: 70, text: "🧾 Заказ" });
 await cb(OWNER, `st:${id2}:sent`, { chat: { id: OWNER }, message_id: 70, text: "🧾 Заказ" }); await msg(OWNER, "TRACK1"); last();

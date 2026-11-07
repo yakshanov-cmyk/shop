@@ -105,6 +105,93 @@ function cardKb(o) {
   return { inline_keyboard: [row, [{ text: "✖️ Отменить заказ", callback_data: `st:${o.id}:cancel` }]] };
 }
 
+// ---------- удобное создание заказа (мастер) и список заказов ----------
+const ADMIN_KB = { keyboard: [[{ text: "➕ Новый заказ" }, { text: "📋 Заказы" }], [{ text: "❓ Помощь" }]], resize_keyboard: true, is_persistent: true };
+const HELP = "<b>Как работать с заказами</b>\n\n" +
+  "➕ <b>Новый заказ</b> — бот спросит по шагам: товар → цена → доставка → клиент. Заказ создаётся <b>только после кнопки «✅ Создать»</b>, до этого всё можно поправить или отменить.\n" +
+  "Быстрее всего: на первом шаге пришлите ссылку на пост канала (t.me/buyitru/13371) или перешлите пост из канала — товар, цена и доставка подставятся сами.\n\n" +
+  "📋 <b>Заказы</b> — открытые заказы по статусам, ⚠️ просроченные; нажмите на заказ — откроется карточка с кнопками статусов.\n\n" +
+  "Команды: /new — новый заказ, /zakazy — заказы, /status IB-0001 — карточка, /cancel — отменить ввод.";
+const CATALOG_URL = "https://yakshanov-cmyk.github.io/shop/catalog.json";
+const DELIV_BY_C = { "1": 1500, "2": 3000, "05": 750 };
+const STEP_Q = {
+  item: "🛍 <b>Шаг 1 из 4. Что заказывают?</b>\nПришлите ссылку на пост канала (например, t.me/buyitru/13371), перешлите пост из канала — или напишите название товара.",
+  goods: "💶 <b>Шаг 2 из 4. Цена товара в рублях</b> (без доставки). Например: <code>12100</code>",
+  delivery: "📦 <b>Шаг 3 из 4. Доставка до Москвы</b> — выберите или напишите сумму.",
+  client: "👤 <b>Шаг 4 из 4. Клиент</b> — имя и @ник или телефон. Например: <code>Анна @anna</code>",
+};
+const cancelBtn = [{ text: "✖️ Отменить", callback_data: "nw:cancel" }];
+function stepKb(step) {
+  if (step === "delivery") return { inline_keyboard: [[750, 1500, 3000].map(v => ({ text: rub(v), callback_data: "nw:d:" + v })), [{ text: "Без доставки", callback_data: "nw:d:0" }], cancelBtn] };
+  return { inline_keyboard: [cancelBtn] };
+}
+function draftText(d) {
+  return ["📝 <b>Новый заказ — проверьте</b>",
+    `🛍 ${esc(d.item)}`,
+    `💶 Товар: ${rub(d.goods)}`,
+    `📦 Доставка: ${rub(d.delivery)}`,
+    `👤 Клиент: ${esc(d.client)}`,
+    `<b>Итого клиенту: ${rub(d.goods + d.delivery)}</b>`,
+    "", "Заказ появится только после «✅ Создать заказ»."].join("\n");
+}
+const draftKb = () => ({ inline_keyboard: [
+  [{ text: "✅ Создать заказ", callback_data: "nw:ok" }],
+  [{ text: "✏️ Товар", callback_data: "nw:e:item" }, { text: "✏️ Цена", callback_data: "nw:e:goods" }],
+  [{ text: "✏️ Доставка", callback_data: "nw:e:delivery" }, { text: "✏️ Клиент", callback_data: "nw:e:client" }],
+  cancelBtn] });
+const draftGet = (env, chat) => kvGet(env, "draft:" + chat);
+const draftPut = (env, chat, d) => kvPut(env, "draft:" + chat, d, { expirationTtl: 2 * 86400 });
+async function draftNext(env, chat, d) {
+  const order = ["item", "goods", "delivery", "client"];
+  const next = d.editing ? null : order.find(k => d[k] === undefined || d[k] === null || d[k] === "");
+  d.step = next || "preview"; d.editing = false;
+  await draftPut(env, chat, d);
+  if (d.step === "preview") return send(env, chat, draftText(d), { reply_markup: draftKb() });
+  return send(env, chat, STEP_Q[d.step], { reply_markup: stepKb(d.step) });
+}
+async function catalogItem(env, post) {
+  try {
+    const r = await fetch(CATALOG_URL + "?t=" + Date.now()); const j = await r.json();
+    return (j.items || []).find(i => String(i.post) === String(post)) || null;
+  } catch (e) { return null; }
+}
+async function fillFromPost(env, d, post) {
+  const it = await catalogItem(env, post);
+  if (!it) { d.item = `Товар из поста https://t.me/buyitru/${post}`; return false; }
+  d.item = `${it.brand} — ${it.title} (пост https://t.me/buyitru/${post})`;
+  d.goods = it.price; d.delivery = DELIV_BY_C[it.c] ?? 1500; d.post = Number(post);
+  return true;
+}
+async function createOrder(env, p, name) {
+  const n = (await kvGet(env, "counter", 0)) + 1; await kvPut(env, "counter", n);
+  const o = { id: "IB-" + String(n).padStart(4, "0"), item: p.item, goods: p.goods, delivery: p.delivery, client: p.client, ...(p.post ? { post: p.post } : {}),
+    status: "Принят", since: Date.now(), created: Date.now(), by: name, history: [{ t: msk(), s: "Принят", by: name }] };
+  await putOrder(env, o);
+  return o;
+}
+const isLate = o => NORM_DAYS[o.status] && days(o.since) > NORM_DAYS[o.status];
+async function ordersMenu(env) {
+  const list = await listOrders(env);
+  if (!list.length) return { text: "📋 Открытых заказов нет.\n\n➕ Новый заказ — кнопка внизу.", kb: { inline_keyboard: [] } };
+  const late = list.filter(isLate).length;
+  const rows = [[{ text: `Все открытые (${list.length})`, callback_data: "ls:all" }]];
+  if (late) rows.push([{ text: `⚠️ Просрочены (${late})`, callback_data: "ls:late" }]);
+  const by = STATUSES.slice(0, 5).map(s => [s, list.filter(o => o.status === s).length]).filter(x => x[1]);
+  for (let i = 0; i < by.length; i += 2) rows.push(by.slice(i, i + 2).map(([s, c]) => ({ text: `${s} (${c})`, callback_data: "ls:s" + STATUSES.indexOf(s) })));
+  const text = `📋 <b>Открытые заказы: ${list.length}</b>` + (late ? `, ⚠️ просрочено: ${late}` : "") + "\n" +
+    by.map(([s, c]) => `• ${s} — ${c}`).join("\n") + "\n\nВыберите раздел:";
+  return { text, kb: { inline_keyboard: rows } };
+}
+async function ordersList(env, f) {
+  let list = await listOrders(env), title = "Все открытые";
+  if (f === "late") { list = list.filter(isLate); title = "⚠️ Просроченные"; }
+  else if (/^s\d$/.test(f)) { const s = STATUSES[+f.slice(1)]; list = list.filter(o => o.status === s); title = s; }
+  const rows = list.slice(0, 40).map(o => [{ text: `${isLate(o) ? "⚠️ " : ""}${o.id} · ${o.status} · ${o.item}`.slice(0, 60), callback_data: "od:" + o.id }]);
+  rows.push([{ text: "← К разделам", callback_data: "ls:menu" }]);
+  const text = `📋 <b>${esc(title)}: ${list.length}</b>\n` + (list.length ? list.slice(0, 40).map(o => `${isLate(o) ? "⚠️" : "•"} <b>${o.id}</b> — ${esc(o.status)} (${days(o.since)} дн.) · ${esc(o.item)} · ${esc(o.client)} · ${rub(o.goods + o.delivery)}`).join("\n") + "\n\nНажмите на заказ — откроется карточка." : "Нет заказов.");
+  return { text, kb: { inline_keyboard: rows } };
+}
+
 async function notifyClient(env, o, text) { if (o.clientChat) await send(env, o.clientChat, text); }
 
 async function setStatus(env, o, status, byName) {
@@ -124,7 +211,7 @@ async function onMessage(env, m) {
   if (env.LANA_USERNAME && (from.username || "").toLowerCase() === env.LANA_USERNAME.toLowerCase() && !(await kvGet(env, "admin:lana"))) {
     await kvPut(env, "admin:lana", from.id);
     await tg(env, "setMyCommands", { commands: ADMIN_CMDS, scope: { type: "chat", chat_id: from.id } });
-    await send(env, from.id, "Вы подключены как менеджер ItalBridge. Команды: /zakazy — открытые заказы, /new — новый заказ.\nФормат: <code>новый заказ: товар; цена товара; доставка; клиент</code>");
+    await send(env, from.id, "Вы подключены как менеджер ItalBridge.\n\n" + HELP, { reply_markup: ADMIN_KB });
     if (text === "/start") return;
   }
   const admin = await isAdmin(env, from.id);
@@ -138,6 +225,39 @@ async function onMessage(env, m) {
       await env.DB.delete("wait:" + chat);
       if (o) { o.track = text; await setStatus(env, o, "Отправлен", name); await send(env, chat, card(o) + "\n\n✅ Трек сохранён, клиент уведомлён.", { reply_markup: cardKb(o) }); }
       return;
+    }
+    // кнопки нижнего меню и отмена
+    if (text === "❓ Помощь" || text === "/help") return send(env, chat, HELP, { reply_markup: ADMIN_KB });
+    if (text === "📋 Заказы" || /^(\/zakazy|мои заказы|\/orders)(@\w+)?\s*$/i.test(text)) { const r = await ordersMenu(env); return send(env, chat, r.text, { reply_markup: r.kb }); }
+    if (text === "/cancel") { await env.DB.delete("draft:" + chat); return send(env, chat, "Ввод отменён.", { reply_markup: ADMIN_KB }); }
+    if (text === "➕ Новый заказ" || /^\/new(@\w+)?\s*$/i.test(text)) {
+      const d = { by: name }; await draftPut(env, chat, d);
+      return draftNext(env, chat, d);
+    }
+    // мастер нового заказа: ответы на шаги
+    const d = await draftGet(env, chat);
+    const fo0 = m.forward_origin || (m.forward_date ? { chat: m.forward_from_chat, message_id: m.forward_from_message_id } : null);
+    const fch = fo0 && (fo0.chat || {});
+    const fromOurChannel = fch && (fch.username || "").toLowerCase() === "buyitru";
+    if (d && d.step && d.step !== "preview" && (!fo0 || fromOurChannel)) {
+      if (d.step === "item") {
+        const lp = text.match(/t\.me\/buyitru\/(\d+)/i) || (fromOurChannel && fo0.message_id ? [null, String(fo0.message_id)] : null);
+        if (lp) {
+          const ok = await fillFromPost(env, d, lp[1]);
+          if (!ok) await send(env, chat, "Поста нет в каталоге — цену и доставку введите вручную.");
+        } else if (text && !text.startsWith("/")) d.item = text;
+        else return send(env, chat, STEP_Q.item, { reply_markup: stepKb("item") });
+        return draftNext(env, chat, d);
+      }
+      if (d.step === "goods" || d.step === "delivery") {
+        const v = parseMoney(text);
+        if (v === null || (d.step === "goods" && v <= 0)) return send(env, chat, "Нужна сумма цифрами, например <code>12100</code>.", { reply_markup: stepKb(d.step) });
+        d[d.step] = v; return draftNext(env, chat, d);
+      }
+      if (d.step === "client") {
+        if (!text || text.startsWith("/")) return send(env, chat, STEP_Q.client, { reply_markup: stepKb("client") });
+        d.client = text; return draftNext(env, chat, d);
+      }
     }
     // пересланный пост поставщика → очередь черновиков
     const fo = m.forward_origin || (m.forward_date ? { date: m.forward_date, chat: m.forward_from_chat } : null);
@@ -157,28 +277,20 @@ async function onMessage(env, m) {
       return;
     }
     if (/^(\/new(@\w+)?|новый заказ)/i.test(text)) {
-      if (/^\/new(@\w+)?\s*$/i.test(text)) return send(env, chat, "Напишите одним сообщением:\n<code>новый заказ: Coccinelle сумка чёрная; 12100; 1500; Анна @anna</code>\n(товар; цена товара; доставка; клиент — доставку можно не писать, будет 1 500 ₽)");
       const p = parseNewOrder(text);
-      if (p.error) return send(env, chat, p.error);
-      const n = (await kvGet(env, "counter", 0)) + 1; await kvPut(env, "counter", n);
-      const o = { id: "IB-" + String(n).padStart(4, "0"), ...p, status: "Принят", since: Date.now(), created: Date.now(), by: name, history: [{ t: msk(), s: "Принят", by: name }] };
-      await putOrder(env, o);
-      return send(env, chat, card(o), { reply_markup: cardKb(o) });
-    }
-    if (/^(\/zakazy|мои заказы|\/orders)/i.test(text)) {
-      const list = await listOrders(env);
-      if (!list.length) return send(env, chat, "Открытых заказов нет.");
-      const lines = list.map(o => { const d = days(o.since); const late = NORM_DAYS[o.status] && d > NORM_DAYS[o.status]; return `${late ? "⚠️" : "•"} <b>${o.id}</b> — ${esc(o.status)} (${d} дн.) · ${esc(o.item)} · ${esc(o.client)} · ${rub(o.goods + o.delivery)}`; });
-      return send(env, chat, `<b>Открытые заказы (${list.length}):</b>\n` + lines.join("\n") + "\n\nКарточка: <code>/status IB-0001</code>");
+      if (p.error) return send(env, chat, p.error + "\n\nИли нажмите «➕ Новый заказ» — бот спросит всё по шагам.", { reply_markup: ADMIN_KB });
+      const dd = { ...p, by: name, step: "preview" }; await draftPut(env, chat, dd);
+      return send(env, chat, draftText(dd), { reply_markup: draftKb() });
     }
     const st = text.match(/^\/status(?:@\w+)?\s+(IB-\d+)/i);
     if (st) { const o = await getOrder(env, st[1].toUpperCase()); return o ? send(env, chat, card(o), { reply_markup: cardKb(o) }) : send(env, chat, "Заказ не найден."); }
     if (text === "/start" || text.startsWith("/start ")) {
       const id = text.split(" ")[1];
-      if (!id || !/^IB-\d+$/i.test(id)) return send(env, chat, "Вы администратор ItalBridge.\n/zakazy — открытые заказы\n/new — новый заказ\n/status IB-0001 — карточка");
+      if (!id || !/^IB-\d+$/i.test(id)) return send(env, chat, "Вы администратор ItalBridge.\n\n" + HELP, { reply_markup: ADMIN_KB });
       // админ открыл ссылку клиента (тест) — продолжаем как клиент ниже
     } else if (text) {
-      return send(env, chat, "Команды: /zakazy, /new, /status IB-0001.\nНовый заказ: <code>новый заказ: товар; цена; доставка; клиент</code>");
+      if (d && d.step === "preview") return send(env, chat, "У вас есть незавершённый заказ — проверьте и нажмите «✅ Создать заказ» или «✖️ Отменить»:\n\n" + draftText(d), { reply_markup: draftKb() });
+      return send(env, chat, "Выберите действие кнопками внизу 👇\n\n" + HELP, { reply_markup: ADMIN_KB });
     }
   }
 
@@ -250,6 +362,53 @@ async function onCallback(env, q) {
   }
   if (data === "noop") return answer("");
 
+  // мастер нового заказа
+  const nw = data.match(/^nw:(.+)$/);
+  if (nw) {
+    const chat = msg.chat.id; const d = await draftGet(env, chat);
+    const act = nw[1];
+    if (act === "cancel") {
+      await env.DB.delete("draft:" + chat);
+      await tg(env, "editMessageReplyMarkup", { chat_id: chat, message_id: msg.message_id, reply_markup: { inline_keyboard: [] } });
+      await send(env, chat, "✖️ Новый заказ отменён — ничего не создано.", { reply_markup: ADMIN_KB });
+      return answer("Отменено");
+    }
+    if (!d) { await tg(env, "editMessageReplyMarkup", { chat_id: chat, message_id: msg.message_id, reply_markup: { inline_keyboard: [] } }); return answer("Черновик уже закрыт. Нажмите «➕ Новый заказ».", true); }
+    if (act.startsWith("d:") && d.step === "delivery") {
+      d.delivery = Number(act.slice(2));
+      await tg(env, "editMessageReplyMarkup", { chat_id: chat, message_id: msg.message_id, reply_markup: { inline_keyboard: [] } });
+      await answer("Доставка: " + rub(d.delivery)); await draftNext(env, chat, d); return;
+    }
+    if (act.startsWith("e:")) {
+      const f = act.slice(2); if (!STEP_Q[f]) return answer("");
+      d.step = f; d.editing = true; await draftPut(env, chat, d);
+      await answer("Изменяем");
+      return send(env, chat, STEP_Q[f], { reply_markup: stepKb(f) });
+    }
+    if (act === "ok") {
+      if (d.step !== "preview" || !d.item || !d.goods || d.delivery == null || !d.client) return answer("Заполните все шаги", true);
+      await env.DB.delete("draft:" + chat);
+      const o = await createOrder(env, d, name);
+      await tg(env, "editMessageText", { chat_id: chat, message_id: msg.message_id, text: draftText(d).replace("📝 <b>Новый заказ — проверьте</b>", `✅ <b>Создан ${o.id}</b>`).replace("\n\nЗаказ появится только после «✅ Создать заказ».", ""), parse_mode: "HTML", disable_web_page_preview: true, reply_markup: { inline_keyboard: [] } });
+      await send(env, chat, card(o) + "\n\n👉 Перешлите клиенту ссылку выше — после нажатия «Запустить» он будет получать статусы.", { reply_markup: cardKb(o) });
+      return answer("Заказ " + o.id + " создан");
+    }
+    return answer("");
+  }
+  // список заказов
+  const ls = data.match(/^ls:(.+)$/);
+  if (ls) {
+    const r = ls[1] === "menu" ? await ordersMenu(env) : await ordersList(env, ls[1]);
+    await tg(env, "editMessageText", { chat_id: msg.chat.id, message_id: msg.message_id, text: r.text, parse_mode: "HTML", disable_web_page_preview: true, reply_markup: r.kb });
+    return answer("");
+  }
+  const od = data.match(/^od:(IB-\d+)$/);
+  if (od) {
+    const o = await getOrder(env, od[1]); if (!o) return answer("Заказ не найден", true);
+    await send(env, msg.chat.id, card(o), { reply_markup: cardKb(o) });
+    return answer("");
+  }
+
   const sm = data.match(/^st:(IB-\d+):(\w+)$/);
   if (!sm) return answer("");
   const o = await getOrder(env, sm[1]);
@@ -286,6 +445,8 @@ const ADMIN_CMDS = [
   { command: "zakazy", description: "Открытые заказы" },
   { command: "new", description: "Новый заказ" },
   { command: "status", description: "Карточка заказа: /status IB-0001" },
+  { command: "cancel", description: "Отменить ввод заказа" },
+  { command: "help", description: "Как работать с заказами" },
 ];
 
 // ---------- ежедневная сводка и напоминания (cron) ----------
@@ -357,4 +518,4 @@ export default {
   },
 };
 
-export { parseNewOrder, card, cardKb };
+export { parseNewOrder, card, cardKb, ADMIN_CMDS };
