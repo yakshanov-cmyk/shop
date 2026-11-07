@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>ItalBridge — цена в рублях</title>
+<title>ItalBridge — каталог и заказ</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 /* ============ НАСТРОЙКИ — меняйте только здесь (см. блок CONFIG в скрипте ниже) ============ */
@@ -49,6 +49,34 @@ button:disabled { opacity: .45; cursor: default; }
 .steps { margin: 0; padding-left: 20px; font-size: 14px; }
 .steps li { margin: 4px 0; }
 .err { color: #d33; font-size: 13px; margin-top: 8px; display: none; }
+
+/* ---------- вкладки и каталог ---------- */
+.tabs { display: flex; gap: 6px; background: var(--bg); border-radius: 12px; padding: 4px; margin-bottom: 12px; position: sticky; top: 0; z-index: 5; }
+.tabs button { margin: 0; padding: 10px 6px; background: transparent; color: var(--text); font-weight: 600; font-size: 15px; border-radius: 9px; }
+.tabs button.on { background: var(--accent); color: var(--accent-text); }
+.chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; margin: 0 -2px; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.chip { flex: 0 0 auto; width: auto; margin: 0; padding: 8px 12px; font-size: 14px; font-weight: 500; border-radius: 18px;
+  background: var(--bg2); color: var(--text); border: 1px solid var(--line); }
+.chip.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.frow { display: flex; gap: 8px; margin-top: 10px; }
+.frow > * { flex: 1; min-width: 0; }
+.frow input, .frow select { padding: 9px 10px; font-size: 15px; }
+.flabel { font-size: 12px; color: var(--hint); margin: 12px 0 6px; }
+.meta { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: var(--hint); margin: 4px 2px 10px; }
+.linkbtn { width: auto; margin: 0; padding: 0; background: none; color: var(--accent); font-weight: 500; font-size: 13px; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.item { background: var(--bg); border-radius: 14px; overflow: hidden; cursor: pointer; display: flex; flex-direction: column;
+  width: 100%; margin: 0; padding: 0; border: 0; text-align: left; color: var(--text); font-weight: 400; }
+.item img { width: 100%; aspect-ratio: 600 / 456; object-fit: cover; display: block; background: var(--bg2); }
+.item .ib { padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 2px; }
+.item .br { font-size: 12px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; }
+.item .tt { font-size: 13px; color: var(--hint); line-height: 1.25; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.item .pr { font-size: 16px; font-weight: 700; margin-top: 4px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; }
+.item .pr s { font-size: 12px; font-weight: 400; color: var(--hint); }
+.item .badge { font-size: 11px; font-weight: 700; color: #fff; background: #C8412B; border-radius: 6px; padding: 1px 6px; }
+.nores { text-align: center; color: var(--hint); padding: 28px 8px; font-size: 14px; }
+.postlink { display: inline-block; margin-top: 10px; font-size: 14px; color: var(--accent); text-decoration: none; }
 </style>
 </head>
 <body>
@@ -61,10 +89,45 @@ button:disabled { opacity: .45; cursor: default; }
 </div>
 </header>
 
+<nav class="tabs" id="tabs">
+<button type="button" data-tab="catalog" class="on">🛍 Каталог</button>
+<button type="button" data-tab="calc">💶 Цена и заказ</button>
+</nav>
+
+<div id="catalogView">
+<section class="card">
+<input id="q" type="search" placeholder="Поиск: бренд или вещь" autocomplete="off">
+<div class="flabel">Раздел</div>
+<div class="chips" id="catChips"></div>
+<div class="chips" id="flagChips" style="margin-top:8px"></div>
+<div class="flabel">Цена, ₽</div>
+<div class="chips" id="priceChips"></div>
+<div class="frow">
+<input id="pmin" type="text" inputmode="numeric" placeholder="от" aria-label="Цена от, рублей">
+<input id="pmax" type="text" inputmode="numeric" placeholder="до" aria-label="Цена до, рублей">
+</div>
+<div class="frow">
+<select id="brand" aria-label="Бренд"><option value="">Все бренды</option></select>
+<select id="sort" aria-label="Сортировка">
+<option value="new">Сначала новые</option>
+<option value="cheap">Сначала дешевле</option>
+<option value="exp">Сначала дороже</option>
+</select>
+</div>
+</section>
+<div class="meta"><span id="count">Загружаем каталог…</span><button type="button" class="linkbtn" id="reset" hidden>Сбросить фильтры</button></div>
+<div class="grid" id="grid"></div>
+<p class="note" style="text-align:center;margin-top:14px">Цены — под ключ до Москвы без доставки. Доставка от 1 500 ₽.</p>
+</div>
+
+<div id="calcView" hidden>
+
 <section class="card" id="product" hidden>
 <h2>🛍 Товар из канала</h2>
+<div id="pinfo"></div>
 <div id="post"></div>
 <div id="oldprice" class="note" hidden></div>
+<a class="postlink" id="postlink" href="#" hidden>Открыть пост в канале →</a>
 </section>
 
 <section class="card">
@@ -107,6 +170,7 @@ button:disabled { opacity: .45; cursor: default; }
 </ol>
 </section>
 </div>
+</div>
 
 <script>
 /* ===================== CONFIG — НАСТРОЙКИ ===================== */
@@ -125,7 +189,8 @@ e — цена в евро (дробная через d: 99d5 = 99,5)
 o — старая цена до скидки, необязательно (o140)
 c — категория: 1 = одежда/сумки, 2 = верхняя одежда/обувь, 05 = аксессуары
 k — курс € Т-Банка на день публикации (97d2 = 97,2) — цена в приложении совпадёт с ценой в посте
-Кнопка меню бота: https://italbridge.github.io/shop/?k=97.2 — курс обновляет бот каждый день */
+Кнопка меню бота: https://yakshanov-cmyk.github.io/shop/ — открывается каталог (catalog.json + img/<пост>.jpg)
+Каталог: catalog.json — items[{post, brand, title, price, old, disc, eur, oldEur, c, k, cat, men, sale, date, img, hidden?}] */
 /* ============================================================== */
 
 const tg = window.Telegram && window.Telegram.WebApp;
@@ -164,6 +229,7 @@ let product = parseProduct(startParam());
 const KURS = product.kurs
 || okKurs(parseFloat(String(new URLSearchParams(location.search).get("k") || "").replace(",", ".")))
 || CONFIG.KURS;
+let productKurs = KURS;
 
 let last = null;
 function calc() {
@@ -174,43 +240,167 @@ last = null;
 $("result").innerHTML = '<div class="empty">Введите цену — посчитаем стоимость под ключ.</div>';
 return;
 }
-const price = ceilTo(eur * KURS * CONFIG.NACENKA + CONFIG.FIX, CONFIG.ROUND);
+const price = ceilTo(eur * productKurs * CONFIG.NACENKA + CONFIG.FIX, CONFIG.ROUND);
 const delivery = Math.round(kg * CONFIG.DOSTAVKA_KG);
 last = { eur, price, delivery, total: price + delivery };
 $("result").innerHTML =
 '<div class="row"><span class="k">Товар под ключ</span><span class="v">' + rub(price) + '</span></div>' +
 '<div class="row"><span class="k">Доставка до Москвы (≈ ' + String(kg).replace(".", ",") + ' кг)</span><span class="v">≈ ' + rub(delivery) + '</span></div>' +
 '<div class="row total"><span class="k">Итого</span><span class="v">≈ ' + rub(last.total) + '</span></div>' +
-'<div class="note">Курс на сегодня: 1 € ≈ ' + String(KURS).replace(".", ",") + ' ₽. Точную цену подтвердит менеджер.</div>';
+'<div class="note">Курс: 1 € ≈ ' + String(productKurs).replace(".", ",") + ' ₽. Точную цену подтвердит менеджер.</div>';
 }
 $("eur").addEventListener("input", calc);
 $("cat").addEventListener("change", calc);
 
 /* ---------- товар из поста ---------- */
-if (product.post || product.eur) {
-$("product").hidden = false;
-if (product.post) {
-const sc = document.createElement("script");
-sc.async = true;
-sc.src = "https://telegram.org/js/telegram-widget.js?22";
-sc.setAttribute("data-telegram-post", CONFIG.CHANNEL + "/" + product.post);
-sc.setAttribute("data-width", "100%");
-sc.setAttribute("data-userpic", "false");
-$("post").appendChild(sc);
-$("item").value = "Товар из поста https://t.me/" + CONFIG.CHANNEL + "/" + product.post;
+function showProduct(p) {
+  product = p;
+  productKurs = p.kurs || KURS;
+  $("product").hidden = false;
+  $("post").innerHTML = "";
+  $("pinfo").innerHTML = p.info ? '<img src="' + esc(p.info.img) + '" alt="" style="width:100%;border-radius:10px;display:block;margin-bottom:10px">' +
+    '<div style="font-weight:700">' + esc(p.info.brand) + '</div><div style="color:var(--hint);font-size:14px">' + esc(cap(p.info.title)) + '</div>' +
+    '<div style="font-size:20px;font-weight:700;margin-top:4px">' + rub(p.info.price) + '</div>' : "";
+  $("oldprice").hidden = true;
+  $("postlink").hidden = true;
+  if (p.post && !p.info) {
+    const sc = document.createElement("script");
+    sc.async = true;
+    sc.src = "https://telegram.org/js/telegram-widget.js?22";
+    sc.setAttribute("data-telegram-post", CONFIG.CHANNEL + "/" + p.post);
+    sc.setAttribute("data-width", "100%");
+    sc.setAttribute("data-userpic", "false");
+    $("post").appendChild(sc);
+    $("item").value = "Товар из поста https://t.me/" + CONFIG.CHANNEL + "/" + p.post;
+    $("postlink").href = "https://t.me/" + CONFIG.CHANNEL + "/" + p.post;
+    $("postlink").hidden = false;
+  }
+  if (p.post && p.info) {
+    $("item").value = "Товар из поста https://t.me/" + CONFIG.CHANNEL + "/" + p.post;
+    $("postlink").href = "https://t.me/" + CONFIG.CHANNEL + "/" + p.post;
+    $("postlink").hidden = false;
+  }
+  if (p.cat) $("cat").value = p.cat;
+  if (p.eur) {
+    $("eur").value = String(p.eur).replace(".", ",");
+    if (p.old && p.old > p.eur) {
+      const oldRub = ceilTo(p.old * productKurs * CONFIG.NACENKA + CONFIG.FIX, CONFIG.ROUND);
+      $("oldprice").hidden = false;
+      $("oldprice").innerHTML = "Без скидки: <s>" + rub(oldRub) + "</s> · скидка " +
+        Math.round((1 - p.eur / p.old) * 100) + " %";
+    }
+  }
+  calc();
 }
-if (product.cat) $("cat").value = product.cat;
-if (product.eur) {
-$("eur").value = String(product.eur).replace(".", ",");
-if (product.old && product.old > product.eur) {
-const oldRub = ceilTo(product.old * KURS * CONFIG.NACENKA + CONFIG.FIX, CONFIG.ROUND);
-$("oldprice").hidden = false;
-$("oldprice").innerHTML = "Без скидки: <s>" + rub(oldRub) + "</s> · скидка " +
-Math.round((1 - product.eur / product.old) * 100) + " %";
+
+/* ---------- вкладки ---------- */
+function setTab(name) {
+  document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
+  $("catalogView").hidden = name !== "catalog";
+  $("calcView").hidden = name !== "calc";
+  window.scrollTo(0, 0);
+  if (tg && tg.BackButton) {
+    if (name === "calc" && cameFromCatalog) tg.BackButton.show(); else tg.BackButton.hide();
+  }
 }
+let cameFromCatalog = false;
+document.querySelectorAll("#tabs button").forEach(b => b.addEventListener("click", () => {
+  if (b.dataset.tab === "catalog") cameFromCatalog = false;
+  setTab(b.dataset.tab);
+}));
+if (tg && tg.BackButton) tg.BackButton.onClick(() => { cameFromCatalog = false; setTab("catalog"); });
+
+/* ---------- каталог ---------- */
+const CATS = [["", "Все"], ["сумки", "Сумки"], ["обувь", "Обувь"], ["одежда", "Одежда"], ["аксессуары", "Аксессуары"], ["косметика", "Косметика"]];
+const BANDS = [[0, 15000, "до 15 тыс"], [15001, 30000, "15–30 тыс"], [30001, 60000, "30–60 тыс"], [60001, 0, "от 60 тыс"]];
+const F = { q: "", cat: "", men: false, sale: false, brand: "", min: 0, max: 0, sort: "new" };
+let ITEMS = [];
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const cap = t => String(t).charAt(0).toUpperCase() + String(t).slice(1);
+const num = s => { const v = parseInt(String(s).replace(/\D/g, ""), 10); return isFinite(v) ? v : 0; };
+
+function chip(label, on, fn) {
+  const b = document.createElement("button");
+  b.type = "button"; b.className = "chip" + (on ? " on" : ""); b.textContent = label;
+  b.addEventListener("click", fn);
+  return b;
 }
-calc();
+function drawChips() {
+  const cc = $("catChips"); cc.innerHTML = "";
+  CATS.forEach(([v, l]) => {
+    if (v && !ITEMS.some(i => i.cat === v)) return;
+    cc.appendChild(chip(l, F.cat === v, () => { F.cat = v; render(); }));
+  });
+  const fc = $("flagChips"); fc.innerHTML = "";
+  fc.appendChild(chip("👔 Мужское", F.men, () => { F.men = !F.men; render(); }));
+  fc.appendChild(chip("🔥 Со скидкой", F.sale, () => { F.sale = !F.sale; render(); }));
+  const pc = $("priceChips"); pc.innerHTML = "";
+  BANDS.forEach(([a, b, l]) => {
+    const on = F.min === a && F.max === b;
+    pc.appendChild(chip(l, on, () => {
+      if (on) { F.min = 0; F.max = 0; } else { F.min = a; F.max = b; }
+      $("pmin").value = F.min ? F.min : ""; $("pmax").value = F.max ? F.max : "";
+      render();
+    }));
+  });
 }
+function filtered() {
+  const q = F.q.trim().toLowerCase();
+  let r = ITEMS.filter(i =>
+    (!F.cat || i.cat === F.cat) && (!F.men || i.men) && (!F.sale || i.sale) &&
+    (!F.brand || i.brand === F.brand) &&
+    (!F.min || i.price >= F.min) && (!F.max || i.price <= F.max) &&
+    (!q || (i.brand + " " + i.title).toLowerCase().includes(q)));
+  if (F.sort === "cheap") r.sort((a, b) => a.price - b.price);
+  else if (F.sort === "exp") r.sort((a, b) => b.price - a.price);
+  else r.sort((a, b) => b.post - a.post);
+  return r;
+}
+function render() {
+  drawChips();
+  const r = filtered();
+  const active = F.q || F.cat || F.men || F.sale || F.brand || F.min || F.max;
+  $("reset").hidden = !active;
+  $("count").textContent = "Найдено: " + r.length + " из " + ITEMS.length;
+  const g = $("grid"); g.innerHTML = "";
+  if (!r.length) { g.innerHTML = '<div class="nores" style="grid-column:1/-1">Ничего не нашлось. Попробуйте изменить фильтры — или пришлите менеджеру ссылку на нужную вещь.</div>'; return; }
+  r.forEach(i => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "item";
+    b.innerHTML = '<img loading="lazy" src="' + esc(i.img) + '" alt="' + esc(i.brand + " — " + i.title) + '">' +
+      '<div class="ib"><span class="br">' + esc(i.brand) + '</span><span class="tt">' + esc(cap(i.title)) + '</span>' +
+      '<span class="pr">' + rub(i.price) + (i.old ? '<s>' + rub(i.old) + '</s>' : '') +
+      (i.disc ? '<span class="badge">−' + i.disc + '%</span>' : '') + '</span></div>';
+    b.addEventListener("click", () => {
+      showProduct({ post: String(i.post), eur: i.eur, old: i.oldEur || undefined,
+        cat: i.c === "05" ? "0.5" : i.c, kurs: okKurs(i.k) || undefined, info: i });
+      cameFromCatalog = true;
+      setTab("calc");
+    });
+    g.appendChild(b);
+  });
+}
+$("q").addEventListener("input", e => { F.q = e.target.value; render(); });
+$("pmin").addEventListener("input", e => { F.min = num(e.target.value); render(); });
+$("pmax").addEventListener("input", e => { F.max = num(e.target.value); render(); });
+$("brand").addEventListener("change", e => { F.brand = e.target.value; render(); });
+$("sort").addEventListener("change", e => { F.sort = e.target.value; render(); });
+$("reset").addEventListener("click", () => {
+  Object.assign(F, { q: "", cat: "", men: false, sale: false, brand: "", min: 0, max: 0 });
+  $("q").value = ""; $("pmin").value = ""; $("pmax").value = ""; $("brand").value = "";
+  render();
+});
+fetch("catalog.json?v=" + Date.now()).then(r => r.json()).then(d => {
+  ITEMS = (d.items || []).filter(i => !i.hidden);
+  [...new Set(ITEMS.map(i => i.brand))].sort((a, b) => a.localeCompare(b)).forEach(b => {
+    const o = document.createElement("option"); o.value = b; o.textContent = b; $("brand").appendChild(o);
+  });
+  render();
+}).catch(() => { $("count").textContent = "Каталог не загрузился — обновите страницу."; });
+
+/* ---------- стартовый экран ---------- */
+if (product.post || product.eur) { showProduct(product); setTab("calc"); }
+else setTab("catalog");
 
 $("send").addEventListener("click", () => {
 const item = $("item").value.trim(), city = $("city").value.trim(), name = $("name").value.trim();
