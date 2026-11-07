@@ -43,3 +43,15 @@ const st = await worker.fetch(new Request("https://w/api/state", { headers: { "X
 const bad = await worker.fetch(new Request("https://w/api/state", { headers: { "X-Api-Key": "no" } }), env); console.log("16 API без ключа:", bad.status);
 const badHook = await worker.fetch(new Request("https://w/tg", { method: "POST", body: "{}" }), env); console.log("17 webhook без секрета:", badHook.status);
 await msg(888, "привет"); await msg(888, "ещё раз"); console.log("\n18 незнакомец 2 раза:\n" + last());
+
+// --- регрессия: Выдан после трек-номера и защита от старых кнопок
+await msg(OWNER, "новый заказ: Тест; 1000; Кл"); last();
+const id2 = "IB-0002";
+for (const c of ["paid","bought"]) await cb(OWNER, `st:${id2}:${c}`, { chat: { id: OWNER }, message_id: 70, text: "🧾 Заказ" });
+await cb(OWNER, `st:${id2}:sent`, { chat: { id: OWNER }, message_id: 70, text: "🧾 Заказ" }); await msg(OWNER, "TRACK1"); last();
+await cb(OWNER, `st:${id2}:msk`, { chat: { id: OWNER }, message_id: 71, text: "🧾 Заказ IB-0002 ... ✅ Трек сохранён" });
+console.log("\n19 после «В Москве» под сообщением с треком:\n" + last());
+await cb(OWNER, `st:${id2}:sent`, { chat: { id: OWNER }, message_id: 70, text: "🧾 Заказ" });
+console.log("\n20 старая кнопка «Отправлен»:\n" + last());
+await cb(OWNER, `st:${id2}:done`, { chat: { id: OWNER }, message_id: 71, text: "🧾 Заказ" });
+console.log("\n21 Выдан:\n" + last());

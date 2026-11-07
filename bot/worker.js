@@ -136,7 +136,7 @@ async function onMessage(env, m) {
     if (wait && wait.what === "track" && text && !text.startsWith("/")) {
       const o = await getOrder(env, wait.order);
       await env.DB.delete("wait:" + chat);
-      if (o) { o.track = text; await setStatus(env, o, "Отправлен", name); await send(env, chat, `Трек сохранён, клиент уведомлён.\n\n${card(o)}`, { reply_markup: cardKb(o) }); }
+      if (o) { o.track = text; await setStatus(env, o, "Отправлен", name); await send(env, chat, card(o) + "\n\n✅ Трек сохранён, клиент уведомлён.", { reply_markup: cardKb(o) }); }
       return;
     }
     if (/^(\/new(@\w+)?|новый заказ)/i.test(text)) {
@@ -238,7 +238,10 @@ async function onCallback(env, q) {
   const o = await getOrder(env, sm[1]);
   if (!o) return answer("Заказ не найден", true);
   const code = sm[2];
-  if (["Выдан", "Отменён"].includes(o.status) && code !== "noop") return answer(`Заказ уже ${o.status.toLowerCase()}`);
+  const refresh = () => msg && tg(env, "editMessageText", { chat_id: msg.chat.id, message_id: msg.message_id, text: card(o), parse_mode: "HTML", disable_web_page_preview: true, reply_markup: cardKb(o) });
+  // разрешены только следующие шаги (старые кнопки на старых сообщениях не срабатывают)
+  const allowed = new Set([...(NEXT_BTNS[o.status] || []).map(x => x[1]), ...(["Выдан", "Отменён"].includes(o.status) ? [] : ["cancel"]), ...(o.status === "Принят" ? ["nopay"] : [])]);
+  if (!allowed.has(code)) { await refresh(); return answer(`Статус уже «${o.status}» — обновил карточку`); }
 
   if (code === "inv") {
     if (!o.clientChat) return answer("Клиент ещё не открыл ссылку — отправьте ему ссылку из карточки", true);
@@ -258,12 +261,8 @@ async function onCallback(env, q) {
     await answer(`Статус: ${o.status}`);
   } else return answer("");
 
-  // обновить карточку, если нажато под карточкой заказа
-  if (msg && (msg.text || "").startsWith("🧾 Заказ") ) {
-    await tg(env, "editMessageText", { chat_id: msg.chat.id, message_id: msg.message_id, text: card(o), parse_mode: "HTML", disable_web_page_preview: true, reply_markup: cardKb(o) });
-  } else if (msg) {
-    await tg(env, "editMessageReplyMarkup", { chat_id: msg.chat.id, message_id: msg.message_id, reply_markup: { inline_keyboard: [[{ text: `${o.id}: ${o.status}`, callback_data: "noop" }]] } });
-  }
+  // любое сообщение с кнопками заказа превращается в актуальную карточку со следующими шагами
+  await refresh();
 }
 
 const ADMIN_CMDS = [
