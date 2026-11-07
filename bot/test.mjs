@@ -55,3 +55,17 @@ await cb(OWNER, `st:${id2}:sent`, { chat: { id: OWNER }, message_id: 70, text: "
 console.log("\n20 старая кнопка «Отправлен»:\n" + last());
 await cb(OWNER, `st:${id2}:done`, { chat: { id: OWNER }, message_id: 71, text: "🧾 Заказ" });
 console.log("\n21 Выдан:\n" + last());
+
+// --- пересылка постов поставщика в очередь
+const now = Math.floor(Date.now()/1000);
+await hook({ message: { message_id: 900, date: now, media_group_id: "G1", chat: { id: OWNER, type: "private" }, from: { id: OWNER, first_name: "Александр" }, photo: [{ file_id: "s" }, { file_id: "BIG1" }], caption: "#Prada | 520€", forward_origin: { type: "channel", chat: { title: "Онлайн-шопинг в Италии", username: "shopping_italia_outlet" }, message_id: 777, date: now - 3600 } } });
+await hook({ message: { message_id: 901, date: now, media_group_id: "G1", chat: { id: OWNER, type: "private" }, from: { id: OWNER, first_name: "Александр" }, photo: [{ file_id: "BIG2" }], forward_origin: { type: "channel", chat: { username: "shopping_italia_outlet" }, message_id: 778, date: now - 3600 } } });
+await hook({ message: { message_id: 902, date: now, chat: { id: OWNER, type: "private" }, from: { id: OWNER, first_name: "Александр" }, photo: [{ file_id: "OLD" }], caption: "#Gucci 300€", forward_origin: { type: "channel", chat: { title: "X" }, message_id: 5, date: now - 4*86400 } } });
+console.log("\n22 пересылка:\n" + last());
+const q = await (await worker.fetch(new Request("https://w/api/queue", { headers: { "X-Api-Key": "k" } }), env)).json();
+console.log("23 очередь:", JSON.stringify(q.queue.map(g => [g.group, g.src, g.srcMsg, g.photos, g.text])));
+await worker.fetch(new Request("https://w/api/queue/done", { method: "POST", headers: { "X-Api-Key": "k" }, body: JSON.stringify({ group: "G1" }) }), env);
+const q2 = await (await worker.fetch(new Request("https://w/api/queue", { headers: { "X-Api-Key": "k" } }), env)).json();
+console.log("24 после done:", q2.queue.length);
+await hook({ message: { message_id: 903, date: now, chat: { id: CLIENT, type: "private" }, from: { id: CLIENT }, text: "смотрите", forward_origin: { type: "channel", chat: { title: "X" }, date: now } } });
+console.log("25 пересылка от клиента (не в очередь):\n" + last());

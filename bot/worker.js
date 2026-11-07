@@ -139,6 +139,23 @@ async function onMessage(env, m) {
       if (o) { o.track = text; await setStatus(env, o, "Отправлен", name); await send(env, chat, card(o) + "\n\n✅ Трек сохранён, клиент уведомлён.", { reply_markup: cardKb(o) }); }
       return;
     }
+    // пересланный пост поставщика → очередь черновиков
+    const fo = m.forward_origin || (m.forward_date ? { date: m.forward_date, chat: m.forward_from_chat } : null);
+    if (fo) {
+      const srcChat = fo.chat || fo.sender_chat || {};
+      const src = srcChat.username || srcChat.title || fo.sender_user_name || (fo.sender_user && (fo.sender_user.username || fo.sender_user.first_name)) || "пересылка";
+      const date = (fo.date || m.date) * 1000;
+      const group = m.media_group_id || `${chat}_${m.message_id}`;
+      const photo = m.photo ? m.photo[m.photo.length - 1].file_id : (m.document && /^image\//.test(m.document.mime_type || "") ? m.document.file_id : null);
+      await kvPut(env, `fwdm:${group}:${String(m.message_id).padStart(10, "0")}`,
+        { src, srcMsg: fo.message_id || null, date, photo, text: m.caption || m.text || "", by: name, ts: Date.now() }, { expirationTtl: 7 * 86400 });
+      if (!m.media_group_id || m.caption) {
+        const age = (Date.now() - date) / 3600e3;
+        return send(env, chat, `📥 Принято в очередь черновиков: <b>${esc(src)}</b>, пост от ${msk(date)}.` +
+          (age > 48 ? "\n⚠️ Посту больше 2 суток — по правилу свежести в черновик не попадёт." : "\nПопадёт в ближайшие черновики (~9:00 / ~19:00)."));
+      }
+      return;
+    }
     if (/^(\/new(@\w+)?|новый заказ)/i.test(text)) {
       if (/^\/new(@\w+)?\s*$/i.test(text)) return send(env, chat, "Напишите одним сообщением:\n<code>новый заказ: Coccinelle сумка чёрная; 12100; 1500; Анна @anna</code>\n(товар; цена товара; доставка; клиент — доставку можно не писать, будет 1 500 ₽)");
       const p = parseNewOrder(text);
@@ -300,6 +317,20 @@ async function api(env, req, url) {
     const b = await req.json(); const k = "dec:" + b.key; const d = await kvGet(env, k, {});
     await kvPut(env, k, { ...d, published: b.post, pts: Date.now() }, { expirationTtl: 30 * 86400 });
     return j({ ok: true });
+  }
+  if (url.pathname === "/api/queue") {
+    const groups = {}; let cursor;
+    do { const r = await env.DB.list({ prefix: "fwdm:", cursor });
+      for (const k of r.keys) { const [, g] = k.name.split(":"); const v = await kvGet(env, k.name); if (!v) continue;
+        const G = groups[g] ||= { group: g, src: v.src, srcMsg: v.srcMsg, date: v.date, by: v.by, photos: [], text: "" };
+        if (v.photo) G.photos.push(v.photo); if (v.text && !G.text) G.text = v.text; if (v.srcMsg && !G.srcMsg) G.srcMsg = v.srcMsg; }
+      cursor = r.list_complete ? null : r.cursor; } while (cursor);
+    return j({ queue: Object.values(groups).sort((a, b) => a.date - b.date) });
+  }
+  if (url.pathname === "/api/queue/done" && req.method === "POST") {
+    const b = await req.json(); let cursor, n = 0;
+    do { const r = await env.DB.list({ prefix: `fwdm:${b.group}:`, cursor }); for (const k of r.keys) { await env.DB.delete(k.name); n++; } cursor = r.list_complete ? null : r.cursor; } while (cursor);
+    return j({ ok: true, deleted: n });
   }
   if (url.pathname === "/api/forget" && req.method === "POST") { const b = await req.json(); await env.DB.delete("dec:" + b.key); return j({ ok: true }); }
   return new Response("not found", { status: 404 });
