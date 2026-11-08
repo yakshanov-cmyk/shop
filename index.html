@@ -131,7 +131,7 @@ button:disabled { opacity: .45; cursor: default; }
 </section>
 
 <section class="card">
-<h2>💶 Цена в рублях</h2>
+<h2>💶 Калькулятор: евро → рубли</h2>
 <label for="eur">Цена товара в евро</label>
 <div class="eur"><input id="eur" type="text" inputmode="decimal" placeholder="99" autocomplete="off"><span>€</span></div>
 
@@ -142,7 +142,7 @@ button:disabled { opacity: .45; cursor: default; }
 <option value="0.5">Украшения, аксессуары (≈ 0,5 кг)</option>
 </select>
 
-<div class="result" id="result"><div class="empty">Введите цену — посчитаем стоимость под ключ.</div></div>
+<div class="result" id="result"><div class="empty">Введите цену в евро — покажем стоимость в рублях под ключ.</div></div>
 </section>
 
 <section class="card">
@@ -237,7 +237,7 @@ const eur = parseEur($("eur").value);
 const kg = parseFloat($("cat").value);
 if (!eur) {
 last = null;
-$("result").innerHTML = '<div class="empty">Введите цену — посчитаем стоимость под ключ.</div>';
+$("result").innerHTML = '<div class="empty">Введите цену в евро — покажем стоимость в рублях под ключ.</div>';
 return;
 }
 const price = ceilTo(eur * productKurs * CONFIG.NACENKA + CONFIG.FIX, CONFIG.ROUND);
