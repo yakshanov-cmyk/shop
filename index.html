@@ -212,7 +212,8 @@ p — номер поста в канале (фото и описание под
 e — цена в евро (дробная через d: 99d5 = 99,5)
 o — старая цена до скидки, необязательно (o140)
 c — категория: 1 = одежда/сумки, 2 = верхняя одежда/обувь, 05 = аксессуары
-k — курс € Т-Банка на день публикации (97d2 = 97,2) — цена в приложении совпадёт с ценой в посте
+k — курс € Т-Банка на день публикации (97d2 = 97,2) — запасной, если живой курс не загрузился
+Живой курс: при открытии берётся с https://italbridge.italbridge-1cd0ad.workers.dev/kurs (бот раз в 2 часа обновляет курс продажи € Т-Банка с Bankiros) — цены в каталоге и калькуляторе считаются по нему
 Кнопка меню бота: https://yakshanov-cmyk.github.io/shop/ — открывается каталог (catalog.json + img/<пост>.jpg)
 Каталог: catalog.json — items[{post, brand, title, price, old, disc, eur, oldEur, c, k, cat, men, sale, date, img, hidden?}]
 Отзывы: reviews.json — items[{id, name, rating, text, item, post, reviewPost, date, img, hidden?}]. Вкладка появляется при первом отзыве; прямая ссылка: ?startapp=reviews */
@@ -251,10 +252,24 @@ if (k === "k" && /^\d+(d\d+)?$/.test(v)) out.kurs = okKurs(parseFloat(v.replace(
 return out;
 }
 let product = parseProduct(startParam());
-const KURS = product.kurs
+const KURS_URL = "https://italbridge.italbridge-1cd0ad.workers.dev/kurs";
+let LIVE = null; // живой курс {kurs, ts}
+let KURS = product.kurs
 || okKurs(parseFloat(String(new URLSearchParams(location.search).get("k") || "").replace(",", ".")))
 || CONFIG.KURS;
 let productKurs = KURS;
+const priceAt = (eur, k) => ceilTo(eur * k * CONFIG.NACENKA + CONFIG.FIX, CONFIG.ROUND);
+const kursNow = p => (LIVE && LIVE.kurs) || (p && p.kurs) || KURS;
+function kursNote(p) {
+  const k = String(productKurs).replace(".", ",");
+  if (LIVE && LIVE.kurs) {
+    const d = new Date(LIVE.ts + 3 * 3600e3), hh = String(d.getUTCHours()).padStart(2, "0"), mm = String(d.getUTCMinutes()).padStart(2, "0");
+    let t = "Курс Т-Банка сегодня: 1 € = " + k + " ₽ (на " + hh + ":" + mm + " МСК).";
+    if (p && p.kurs && Math.abs(p.kurs - LIVE.kurs) >= 0.05) t += " Цена пересчитана по сегодняшнему курсу — в посте она по курсу на день публикации (" + String(p.kurs).replace(".", ",") + " ₽).";
+    return t + " Точную цену подтвердит менеджер.";
+  }
+  return "Курс: 1 € ≈ " + k + " ₽. Точную цену подтвердит менеджер.";
+}
 
 let last = null;
 function calc() {
@@ -265,14 +280,14 @@ last = null;
 $("result").innerHTML = '<div class="empty">Введите цену в евро — покажем стоимость в рублях под ключ.</div>';
 return;
 }
-const price = ceilTo(eur * productKurs * CONFIG.NACENKA + CONFIG.FIX, CONFIG.ROUND);
+const price = priceAt(eur, productKurs);
 const delivery = Math.round(kg * CONFIG.DOSTAVKA_KG);
 last = { eur, price, delivery, total: price + delivery };
 $("result").innerHTML =
 '<div class="row"><span class="k">Товар под ключ</span><span class="v">' + rub(price) + '</span></div>' +
 '<div class="row"><span class="k">Доставка до Москвы (≈ ' + String(kg).replace(".", ",") + ' кг)</span><span class="v">≈ ' + rub(delivery) + '</span></div>' +
 '<div class="row total"><span class="k">Итого</span><span class="v">≈ ' + rub(last.total) + '</span></div>' +
-'<div class="note">Курс: 1 € ≈ ' + String(productKurs).replace(".", ",") + ' ₽. Точную цену подтвердит менеджер.</div>';
+'<div class="note">' + kursNote(product) + '</div>';
 }
 $("eur").addEventListener("input", calc);
 $("cat").addEventListener("change", calc);
@@ -280,7 +295,7 @@ $("cat").addEventListener("change", calc);
 /* ---------- товар из поста ---------- */
 function showProduct(p) {
   product = p;
-  productKurs = p.kurs || KURS;
+  productKurs = kursNow(p);
   $("product").hidden = false;
   $("post").innerHTML = "";
   $("pinfo").innerHTML = p.info ? '<img src="' + esc(p.info.img) + '" alt="" style="width:100%;border-radius:10px;display:block;margin-bottom:10px">' +
@@ -309,7 +324,7 @@ function showProduct(p) {
   if (p.eur) {
     $("eur").value = String(p.eur).replace(".", ",");
     if (p.old && p.old > p.eur) {
-      const oldRub = ceilTo(p.old * productKurs * CONFIG.NACENKA + CONFIG.FIX, CONFIG.ROUND);
+      const oldRub = priceAt(p.old, productKurs);
       $("oldprice").hidden = false;
       $("oldprice").innerHTML = "Без скидки: <s>" + rub(oldRub) + "</s> · скидка " +
         Math.round((1 - p.eur / p.old) * 100) + " %";
@@ -420,6 +435,7 @@ $("reset").addEventListener("click", () => {
 fetch("catalog.json?v=" + Date.now()).then(r => r.json()).then(d => {
   ALL_ITEMS = d.items || [];
   ITEMS = ALL_ITEMS.filter(i => !i.hidden);
+  repriceCatalog();
   [...new Set(ITEMS.map(i => i.brand))].sort((a, b) => a.localeCompare(b)).forEach(b => {
     const o = document.createElement("option"); o.value = b; o.textContent = b; $("brand").appendChild(o);
   });
@@ -478,6 +494,29 @@ fetch("reviews.json?v=" + Date.now()).then(r => r.json()).then(d => {
   drawReviews();
   drawProductReviews();
   if (REVIEWS.length && startParam() === "reviews") setTab("reviews");
+}).catch(() => {});
+
+/* ---------- живой курс: пересчёт каталога и открытого товара ---------- */
+function repriceCatalog() {
+  if (!(LIVE && LIVE.kurs)) return;
+  ALL_ITEMS.forEach(i => {
+    if (!i.eur) return;
+    if (i.pricePub == null) { i.pricePub = i.price; i.oldPub = i.old; }
+    i.price = priceAt(i.eur, LIVE.kurs);
+    if (i.oldEur) i.old = priceAt(i.oldEur, LIVE.kurs);
+  });
+}
+const kursCtl = typeof AbortController !== "undefined" ? new AbortController() : null;
+setTimeout(() => kursCtl && kursCtl.abort(), 3000);
+fetch(KURS_URL, kursCtl ? { signal: kursCtl.signal } : {}).then(r => r.ok ? r.json() : null).then(d => {
+  const k = d && okKurs(Number(d.kurs));
+  if (!k) return;
+  LIVE = { kurs: k, ts: d.ts || Date.now() };
+  KURS = k;
+  repriceCatalog();
+  if (ITEMS.length) render();
+  if (product && (product.post || product.eur) && !$("product").hidden) showProduct(product);
+  else calc();
 }).catch(() => {});
 
 /* ---------- стартовый экран ---------- */

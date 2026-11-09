@@ -686,9 +686,34 @@ async function api(env, req, url) {
   return new Response("not found", { status: 404 });
 }
 
+// ---------- живой курс € Т-Банка (для мини-приложения) ----------
+const KURS_TTL = 2 * 3600e3; // обновлять не реже раза в 2 часа
+async function fetchKurs() {
+  const r = await fetch("https://bankiros.ru/bank/tcs/currency/eur/moskva", { headers: { "User-Agent": "Mozilla/5.0 (ItalBridge bot)", "Accept-Language": "ru" }, cf: { cacheTtl: 600 } });
+  if (!r.ok) throw new Error("bankiros " + r.status);
+  const t = (await r.text()).replace(/<[^>]+>/g, " ").replace(/&nbsp;|\s+/g, " ");
+  const m = t.match(/Курсы «Т-Банка»[\s\S]{0,200}?EUR\s*([\d]{2,3}[.,]\d{1,2})\s+([\d]{2,3}[.,]\d{1,2})/);
+  if (!m) throw new Error("bankiros: блок не найден");
+  const buy = parseFloat(m[1].replace(",", ".")), sell = parseFloat(m[2].replace(",", "."));
+  if (!(sell > 60 && sell < 150 && buy < sell)) throw new Error("bankiros: странные числа " + buy + "/" + sell);
+  return { kurs: sell, buy, ts: Date.now(), src: "bankiros.ru · Т-Банк, продажа €" };
+}
+async function getKurs(env, force = false) {
+  const c = await kvGet(env, "kurs:live");
+  if (!force && c && Date.now() - c.ts < KURS_TTL) return c;
+  try { const k = await fetchKurs(); await kvPut(env, "kurs:live", k); return k; }
+  catch (e) { console.log("kurs", String(e)); return c ? { ...c, stale: true } : null; }
+}
+async function kursResponse(env) {
+  const k = await getKurs(env);
+  return new Response(JSON.stringify(k || { kurs: null }), { status: k ? 200 : 503, headers: {
+    "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=300" } });
+}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
+    if (url.pathname === "/kurs") return kursResponse(env);
     if (url.pathname.startsWith("/api/")) return api(env, req, url);
     if (url.pathname === "/tg" && req.method === "POST") {
       if (req.headers.get("X-Telegram-Bot-Api-Secret-Token") !== env.WEBHOOK_SECRET) return new Response("forbidden", { status: 403 });
@@ -702,6 +727,7 @@ export default {
     return new Response("ItalBridge bot is running");
   },
   async scheduled(ev, env) {
+    await getKurs(env, true);
     // 07:00 UTC = 10:00 МСК — сводка; остальные запуски — только напоминания о просрочках
     const morning = new Date(ev.scheduledTime).getUTCHours() === 7;
     await daily(env, morning);
