@@ -658,7 +658,8 @@ async function api(env, req, url) {
   if (url.pathname === "/api/queue") {
     const groups = {}; let cursor;
     do { const r = await env.DB.list({ prefix: "fwdm:", cursor });
-      for (const k of r.keys) { const [, g] = k.name.split(":"); const v = await kvGet(env, k.name); if (!v) continue;
+      const vals = await Promise.all(r.keys.map(k => kvGet(env, k.name)));
+      for (let ix = 0; ix < r.keys.length; ix++) { const k = r.keys[ix]; const [, g] = k.name.split(":"); const v = vals[ix]; if (!v) continue;
         const G = groups[g] ||= { group: g, src: v.src, srcMsg: v.srcMsg, date: v.date, by: v.by, photos: [], text: "" };
         if (v.photo) G.photos.push(v.photo); if (v.text && !G.text) G.text = v.text; if (v.srcMsg && !G.srcMsg) G.srcMsg = v.srcMsg; }
       cursor = r.list_complete ? null : r.cursor; } while (cursor);
@@ -666,7 +667,7 @@ async function api(env, req, url) {
   }
   if (url.pathname === "/api/queue/done" && req.method === "POST") {
     const b = await req.json(); let cursor, n = 0;
-    do { const r = await env.DB.list({ prefix: `fwdm:${b.group}:`, cursor }); for (const k of r.keys) { await env.DB.delete(k.name); n++; } cursor = r.list_complete ? null : r.cursor; } while (cursor);
+    do { const r = await env.DB.list({ prefix: `fwdm:${b.group}:`, cursor }); await Promise.all(r.keys.map(k => env.DB.delete(k.name))); n += r.keys.length; cursor = r.list_complete ? null : r.cursor; } while (cursor);
     return j({ ok: true, deleted: n });
   }
   if (url.pathname === "/api/reviews") {
