@@ -77,6 +77,19 @@ button:disabled { opacity: .45; cursor: default; }
 .item .badge { font-size: 11px; font-weight: 700; color: #fff; background: #C8412B; border-radius: 6px; padding: 1px 6px; }
 .nores { text-align: center; color: var(--hint); padding: 28px 8px; font-size: 14px; }
 .postlink { display: inline-block; margin-top: 10px; font-size: 14px; color: var(--accent); text-decoration: none; }
+.tabs.three button { padding: 10px 2px; font-size: 13px; white-space: nowrap; flex: 1 1 auto; width: auto; }
+.rsum { display: flex; align-items: baseline; gap: 8px; }
+.rsum b { font-size: 26px; }
+.rstars { color: #E0A100; letter-spacing: 1px; }
+.rv { background: var(--bg); border-radius: 14px; padding: 14px; margin-bottom: 10px; }
+.card .rv { padding: 12px 0 0; margin: 12px 0 0; border-top: 1px solid var(--line); border-radius: 0; }
+.rvh { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.rvn { font-weight: 600; font-size: 15px; }
+.rvd { font-size: 12px; color: var(--hint); flex: 0 0 auto; }
+.rvok { font-size: 12px; color: var(--accent); margin: 2px 0 6px; }
+.rvt { font-size: 15px; margin: 6px 0; white-space: pre-line; overflow-wrap: anywhere; }
+.rvi { font-size: 13px; color: var(--hint); }
+.rv img { width: 100%; max-height: 360px; object-fit: cover; border-radius: 10px; display: block; margin-top: 8px; background: var(--bg2); }
 </style>
 </head>
 <body>
@@ -92,6 +105,7 @@ button:disabled { opacity: .45; cursor: default; }
 <nav class="tabs" id="tabs">
 <button type="button" data-tab="catalog" class="on">🛍 Каталог</button>
 <button type="button" data-tab="calc">💶 Цена и заказ</button>
+<button type="button" data-tab="reviews" id="tabReviews" hidden>⭐ Отзывы</button>
 </nav>
 
 <div id="catalogView">
@@ -120,6 +134,14 @@ button:disabled { opacity: .45; cursor: default; }
 <p class="note" style="text-align:center;margin-top:14px">Цены — под ключ до Москвы без доставки. Доставка от 1 500 ₽.</p>
 </div>
 
+<div id="reviewsView" hidden>
+<section class="card">
+<div class="rsum"><b id="ravg"></b><span class="rstars" id="rstars"></span><span class="rvd" id="rcount"></span></div>
+<p class="note" style="margin-bottom:0">Отзывы оставляют только покупатели: бот просит оценку после выдачи заказа.</p>
+</section>
+<div id="rlist"></div>
+</div>
+
 <div id="calcView" hidden>
 
 <section class="card" id="product" hidden>
@@ -129,6 +151,8 @@ button:disabled { opacity: .45; cursor: default; }
 <div id="oldprice" class="note" hidden></div>
 <a class="postlink" id="postlink" href="#" hidden>Открыть пост в канале →</a>
 </section>
+
+<section class="card" id="prevs" hidden></section>
 
 <section class="card">
 <h2>💶 Калькулятор: евро → рубли</h2>
@@ -190,7 +214,8 @@ o — старая цена до скидки, необязательно (o140)
 c — категория: 1 = одежда/сумки, 2 = верхняя одежда/обувь, 05 = аксессуары
 k — курс € Т-Банка на день публикации (97d2 = 97,2) — цена в приложении совпадёт с ценой в посте
 Кнопка меню бота: https://yakshanov-cmyk.github.io/shop/ — открывается каталог (catalog.json + img/<пост>.jpg)
-Каталог: catalog.json — items[{post, brand, title, price, old, disc, eur, oldEur, c, k, cat, men, sale, date, img, hidden?}] */
+Каталог: catalog.json — items[{post, brand, title, price, old, disc, eur, oldEur, c, k, cat, men, sale, date, img, hidden?}]
+Отзывы: reviews.json — items[{id, name, rating, text, item, post, reviewPost, date, img, hidden?}]. Вкладка появляется при первом отзыве; прямая ссылка: ?startapp=reviews */
 /* ============================================================== */
 
 const tg = window.Telegram && window.Telegram.WebApp;
@@ -291,6 +316,7 @@ function showProduct(p) {
     }
   }
   calc();
+  drawProductReviews();
 }
 
 /* ---------- вкладки ---------- */
@@ -298,6 +324,7 @@ function setTab(name) {
   document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
   $("catalogView").hidden = name !== "catalog";
   $("calcView").hidden = name !== "calc";
+  $("reviewsView").hidden = name !== "reviews";
   window.scrollTo(0, 0);
   if (tg && tg.BackButton) {
     if (name === "calc" && cameFromCatalog) tg.BackButton.show(); else tg.BackButton.hide();
@@ -391,12 +418,67 @@ $("reset").addEventListener("click", () => {
   render();
 });
 fetch("catalog.json?v=" + Date.now()).then(r => r.json()).then(d => {
-  ITEMS = (d.items || []).filter(i => !i.hidden);
+  ALL_ITEMS = d.items || [];
+  ITEMS = ALL_ITEMS.filter(i => !i.hidden);
   [...new Set(ITEMS.map(i => i.brand))].sort((a, b) => a.localeCompare(b)).forEach(b => {
     const o = document.createElement("option"); o.value = b; o.textContent = b; $("brand").appendChild(o);
   });
   render();
+  drawProductReviews();
 }).catch(() => { $("count").textContent = "Каталог не загрузился — обновите страницу."; });
+
+/* ---------- отзывы ---------- */
+let ALL_ITEMS = [], REVIEWS = [];
+const brandOfPost = post => { const it = ALL_ITEMS.find(i => String(i.post) === String(post)); return it ? it.brand : ""; };
+const starLine = n => "★".repeat(n) + "☆".repeat(5 - n);
+const ruDate = d => String(d || "").split("-").reverse().join(".");
+const decimal = n => n.toFixed(1).replace(".", ",");
+function reviewsWord(n) {
+  const a = n % 100, b = n % 10;
+  if (a > 10 && a < 20) return "отзывов";
+  return b === 1 ? "отзыв" : b >= 2 && b <= 4 ? "отзыва" : "отзывов";
+}
+function reviewHtml(r) {
+  const rating = Math.min(5, Math.max(1, Number(r.rating) || 1));
+  const post = /^\d+$/.test(String(r.reviewPost)) ? String(r.reviewPost) : "";
+  return '<article class="rv"><div class="rvh"><span class="rvn">' + esc(r.name || "Покупатель") + '</span><span class="rvd">' + esc(ruDate(r.date)) + '</span></div>' +
+    '<div class="rstars" role="img" aria-label="Оценка ' + rating + ' из 5">' + starLine(rating) + '</div>' +
+    '<div class="rvok">✓ Заказ подтверждён</div>' +
+    (r.text ? '<div class="rvt">' + esc(r.text) + '</div>' : '') +
+    (r.item ? '<div class="rvi">🛍 ' + esc(r.item) + '</div>' : '') +
+    (r.img ? '<img loading="lazy" src="' + esc(r.img) + '" alt="Фото покупателя">' : '') +
+    (post ? '<a class="postlink" target="_blank" rel="noopener" href="https://t.me/' + CONFIG.CHANNEL + '/' + post + '">Отзыв в канале →</a>' : '') +
+    '</article>';
+}
+function drawReviews() {
+  if (!REVIEWS.length) return;
+  const avg = REVIEWS.reduce((s, r) => s + (Number(r.rating) || 0), 0) / REVIEWS.length;
+  $("ravg").textContent = decimal(avg);
+  $("rstars").textContent = starLine(Math.round(avg));
+  $("rcount").textContent = REVIEWS.length + " " + reviewsWord(REVIEWS.length);
+  $("rlist").innerHTML = REVIEWS.map(reviewHtml).join("");
+  $("tabReviews").hidden = false;
+  $("tabs").classList.add("three");
+}
+function drawProductReviews() {
+  const box = $("prevs");
+  const post = product && product.post ? String(product.post) : "";
+  const brand = product && product.info ? product.info.brand : brandOfPost(post);
+  const same = REVIEWS.filter(r => post && String(r.post) === post);
+  const byBrand = REVIEWS.filter(r => brand && String(r.post) !== post && brandOfPost(r.post) === brand);
+  const list = same.concat(byBrand);
+  box.hidden = !list.length;
+  if (!list.length) { box.innerHTML = ""; return; }
+  box.innerHTML = "<h2>⭐ Отзывы о " + esc(brand || "товаре") + "</h2>" + list.slice(0, 3).map(reviewHtml).join("") +
+    '<button type="button" class="linkbtn" id="allrev" style="margin-top:12px">Все отзывы →</button>';
+  $("allrev").addEventListener("click", () => { cameFromCatalog = false; setTab("reviews"); });
+}
+fetch("reviews.json?v=" + Date.now()).then(r => r.json()).then(d => {
+  REVIEWS = (d.items || []).filter(r => !r.hidden).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  drawReviews();
+  drawProductReviews();
+  if (REVIEWS.length && startParam() === "reviews") setTab("reviews");
+}).catch(() => {});
 
 /* ---------- стартовый экран ---------- */
 if (product.post || product.eur) { showProduct(product); setTab("calc"); }

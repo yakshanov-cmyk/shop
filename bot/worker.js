@@ -111,7 +111,8 @@ const HELP = "<b>Как работать с заказами</b>\n\n" +
   "➕ <b>Новый заказ</b> — бот спросит по шагам: товар → цена → доставка → клиент. Заказ создаётся <b>только после кнопки «✅ Создать»</b>, до этого всё можно поправить или отменить.\n" +
   "Быстрее всего: на первом шаге пришлите ссылку на пост канала (t.me/buyitru/13371) или перешлите пост из канала — товар, цена и доставка подставятся сами.\n\n" +
   "📋 <b>Заказы</b> — открытые заказы по статусам, ⚠️ просроченные; нажмите на заказ — откроется карточка с кнопками статусов.\n\n" +
-  "Команды: /new — новый заказ, /zakazy — заказы, /status IB-0001 — карточка, /cancel — отменить ввод.";
+  "⭐ <b>Отзывы</b> — через 2 дня после «Выдан» бот сам попросит клиента оценить заказ. Отзыв придёт сюда с кнопками «Опубликовать» / «Скрыть». Запросить сразу: /otzyv IB-0001.\n\n" +
+  "Команды: /new — новый заказ, /zakazy — заказы, /status IB-0001 — карточка, /otzyv IB-0001 — запросить отзыв, /cancel — отменить ввод.";
 const CATALOG_URL = "https://yakshanov-cmyk.github.io/shop/catalog.json";
 const DELIV_BY_C = { "1": 1500, "2": 3000, "05": 750 };
 const STEP_Q = {
@@ -202,6 +203,112 @@ async function setStatus(env, o, status, byName) {
   const f = CLIENT_MSG[status]; if (f) await notifyClient(env, o, f(o.id, o));
 }
 
+// ---------- отзывы ----------
+// Сбор: через REVIEW_AFTER_DAYS после «Выдан» (утренний cron) или по /otzyv IB-XXXX.
+// Ключи KV: review:IB-XXXX (сам отзыв), rvw:<chat> (клиент заполняет отзыв, 3 дня).
+const REVIEW_AFTER_DAYS = 2;
+const REVIEW_FROM = Date.UTC(2026, 10, 9, 17, 0); // выданные раньше (проверочные заказы) не спрашиваем
+const REVIEW_MAX = 1000;
+const ADMIN_BTNS = ["➕ Новый заказ", "📋 Заказы", "❓ Помощь"];
+const CONSENT_TEXT = "Публикация оценки, текста, фото и названия вещи в канале @buyitru и приложении ItalBridge";
+const stars = n => "⭐".repeat(n);
+const getReview = (env, id) => kvGet(env, "review:" + id);
+const putReview = (env, r) => kvPut(env, "review:" + r.id, r);
+const rvPut = (env, chat, s) => kvPut(env, "rvw:" + chat, s, { expirationTtl: 3 * 86400 });
+const itemLabel = o => String(o.item || "").replace(/\s*\(пост https?:\/\/\S+\)\s*$/, "").slice(0, 120);
+function publicName(from) {
+  const first = String(from.first_name || "").trim(), last = String(from.last_name || "").trim();
+  if (!first) return "Покупатель";
+  return first + (last ? " " + [...last][0].toUpperCase() + "." : "");
+}
+const skipKb = { inline_keyboard: [[{ text: "Пропустить →", callback_data: "rv:skip" }]] };
+const photoOf = m => m.photo ? m.photo[m.photo.length - 1].file_id : (m.document && /^image\//.test(m.document.mime_type || "") ? m.document.file_id : null);
+
+async function askReview(env, o) {
+  o.reviewAsked = Date.now(); o.history.push({ t: msk(), s: "Запрошен отзыв" }); await putOrder(env, o);
+  const row = [1, 2, 3, 4, 5].map(n => ({ text: n + " ⭐", callback_data: `rv:r:${o.id}:${n}` }));
+  return send(env, o.clientChat, `Как вам заказ <b>${o.id}</b>?\n🛍 ${esc(itemLabel(o))}\n\nОцените, пожалуйста, — это займёт полминуты:`, { reply_markup: { inline_keyboard: [row] } });
+}
+async function askReviews(env) {
+  const due = (await listOrders(env, false)).filter(o => o.status === "Выдан" && o.clientChat && !o.reviewAsked && o.since >= REVIEW_FROM && days(o.since) >= REVIEW_AFTER_DAYS);
+  for (const o of due.slice(0, 10)) await askReview(env, o);
+}
+async function askConsent(env, chat, s, from) {
+  s.step = "consent"; await rvPut(env, chat, s);
+  const name = publicName(from);
+  return send(env, chat, `Можно опубликовать отзыв в канале @buyitru и приложении ItalBridge?\nПокажем оценку, текст${s.photo ? ", фото" : ""} и название вещи. Подпись можно выбрать:`, { reply_markup: { inline_keyboard: [
+    [{ text: `✅ С именем: ${name}`.slice(0, 60), callback_data: "rv:c:pub" }],
+    [{ text: "✅ Без имени", callback_data: "rv:c:anon" }],
+    [{ text: "🔒 Только менеджеру", callback_data: "rv:c:no" }]] } });
+}
+// true — сообщение относилось к отзыву; false — обработать обычным порядком
+async function reviewInput(env, m, s) {
+  const chat = m.chat.id, text = (m.text || m.caption || "").trim(), photo = photoOf(m);
+  if (m.forward_origin || m.forward_date || text.startsWith("/") || ADMIN_BTNS.includes(text)) return false;
+  if (m.media_group_id && s.mg === m.media_group_id) return true; // остальные фото альбома
+  if (s.step === "text") {
+    if (!text && !photo) { await send(env, chat, "Напишите отзыв текстом или пришлите фото.", { reply_markup: skipKb }); return true; }
+    s.text = text.slice(0, REVIEW_MAX);
+    if (photo) { s.photo = photo; s.mg = m.media_group_id || null; await askConsent(env, chat, s, m.from); return true; }
+    s.step = "photo"; await rvPut(env, chat, s);
+    await send(env, chat, "Спасибо! Пришлите фото вещи, если хотите, — одним сообщением.", { reply_markup: skipKb });
+    return true;
+  }
+  if (s.step === "photo") {
+    if (!photo) { await send(env, chat, "Пришлите фото или нажмите «Пропустить».", { reply_markup: skipKb }); return true; }
+    s.photo = photo; s.mg = m.media_group_id || null;
+    await askConsent(env, chat, s, m.from); return true;
+  }
+  return false;
+}
+function reviewText(r) {
+  return [`${r.rating <= 3 ? "⚠️" : "💬"} <b>Отзыв по ${r.id}</b> ${stars(r.rating)}`, `🛍 ${esc(r.item)}`, `👤 Подпись: ${esc(r.name)}`,
+    r.text ? `\n«${esc(r.text)}»` : "\n(без текста)", "",
+    r.consent === "no" ? "🔒 Клиент просил не публиковать — только для вас." : "Публикуем? Скрывать стоит только мат и личные данные."].join("\n");
+}
+function reviewKb(r) {
+  if (r.consent === "no") return { inline_keyboard: [] };
+  if (r.status === "approved") return { inline_keyboard: [[{ text: `✅ Одобрен: ${mskHour() < 10 ? "~10:00" : mskHour() < 20 ? "~20:00" : "завтра ~10:00"}`, callback_data: "noop" }], [{ text: "🙈 Передумал — скрыть", callback_data: `ra:${r.id}:hide` }]] };
+  if (r.status === "hidden") return { inline_keyboard: [[{ text: "🙈 Скрыт", callback_data: "noop" }], [{ text: "✅ Всё же опубликовать", callback_data: `ra:${r.id}:ok` }]] };
+  return { inline_keyboard: [[{ text: "✅ Опубликовать", callback_data: `ra:${r.id}:ok` }, { text: "🙈 Скрыть", callback_data: `ra:${r.id}:hide` }]] };
+}
+async function onReviewCb(env, q, answer) {
+  const chat = q.from.id, msg = q.message, p = q.data.split(":");
+  const clear = () => msg && tg(env, "editMessageReplyMarkup", { chat_id: msg.chat.id, message_id: msg.message_id, reply_markup: { inline_keyboard: [] } });
+  if (p[1] === "r") {
+    const id = p[2], n = Number(p[3]); const o = await getOrder(env, id);
+    if (!o || o.clientChat !== chat || !(n >= 1 && n <= 5)) return answer("Недоступно");
+    if (await getReview(env, id)) { await clear(); return answer("Отзыв уже получен, спасибо!"); }
+    await rvPut(env, chat, { order: id, rating: n, step: "text", text: "", photo: null });
+    await tg(env, "editMessageText", { chat_id: chat, message_id: msg.message_id, text: `Заказ ${id}: ваша оценка ${stars(n)}`, reply_markup: { inline_keyboard: [] } });
+    await send(env, chat, n >= 4 ? "Спасибо! Напишите пару слов о заказе и вещи — можно сразу с фото." : "Спасибо за честную оценку. Напишите, что пошло не так, — менеджер разберётся. Можно приложить фото.", { reply_markup: skipKb });
+    return answer("");
+  }
+  const s = await kvGet(env, "rvw:" + chat);
+  if (!s) { await clear(); return answer("Время заполнения вышло. Напишите менеджеру, если хотите оставить отзыв.", true); }
+  if (p[1] === "skip") {
+    if (s.step !== "text" && s.step !== "photo") return answer("");
+    await clear(); await askConsent(env, chat, s, q.from); return answer("");
+  }
+  if (p[1] === "c" && s.step === "consent" && ["pub", "anon", "no"].includes(p[2])) {
+    const o = await getOrder(env, s.order);
+    await env.DB.delete("rvw:" + chat); await clear();
+    if (!o || o.clientChat !== chat || await getReview(env, s.order)) return answer("Отзыв уже получен, спасибо!");
+    const r = { id: o.id, item: itemLabel(o), post: o.post || null, rating: s.rating, text: s.text || "", photo: s.photo || null,
+      name: p[2] === "pub" ? publicName(q.from) : "Покупатель", consent: p[2], consentText: p[2] === "no" ? null : CONSENT_TEXT,
+      status: p[2] === "no" ? "private" : "pending", chat, ts: Date.now() };
+    await putReview(env, r);
+    o.history.push({ t: msk(), s: "Получен отзыв " + r.rating + "/5" }); await putOrder(env, o);
+    for (const a of await admins(env)) {
+      if (r.photo) await tg(env, "sendPhoto", { chat_id: a, photo: r.photo });
+      await send(env, a, reviewText(r), { reply_markup: reviewKb(r) });
+    }
+    await send(env, chat, p[2] === "no" ? "Спасибо! Передали менеджеру, публиковать не будем." : "Спасибо! После проверки отзыв появится в канале @buyitru.");
+    return answer("Спасибо!");
+  }
+  return answer("");
+}
+
 // ---------- обработка апдейтов ----------
 async function onMessage(env, m) {
   const chat = m.chat.id, from = m.from || {}, text = (m.text || m.caption || "").trim();
@@ -217,6 +324,10 @@ async function onMessage(env, m) {
   const admin = await isAdmin(env, from.id);
   const name = from.first_name || from.username || "админ";
 
+  // клиент заполняет отзыв (в том числе админ, который проверяет сценарий)
+  const rvs = await kvGet(env, "rvw:" + chat);
+  if (rvs && await reviewInput(env, m, rvs)) return;
+
   if (admin) {
     // ожидание трек-номера
     const wait = await kvGet(env, "wait:" + chat);
@@ -229,6 +340,16 @@ async function onMessage(env, m) {
     // кнопки нижнего меню и отмена
     if (text === "❓ Помощь" || text === "/help") return send(env, chat, HELP, { reply_markup: ADMIN_KB });
     if (text === "📋 Заказы" || /^(\/zakazy|мои заказы|\/orders)(@\w+)?\s*$/i.test(text)) { const r = await ordersMenu(env); return send(env, chat, r.text, { reply_markup: r.kb }); }
+    const oz = text.match(/^\/otzyv(?:@\w+)?\s+(IB-\d+)/i);
+    if (oz) {
+      const o = await getOrder(env, oz[1].toUpperCase());
+      if (!o) return send(env, chat, "Заказ не найден.");
+      if (o.status !== "Выдан") return send(env, chat, `Отзыв можно запросить только после статуса «Выдан». Сейчас: ${esc(o.status)}.`);
+      if (!o.clientChat) return send(env, chat, "Клиент не привязан к боту — запросить отзыв некому.");
+      if (await getReview(env, o.id)) return send(env, chat, "Отзыв по этому заказу уже получен.");
+      await askReview(env, o);
+      return send(env, chat, `⭐ Запрос отзыва по ${o.id} отправлен клиенту.`);
+    }
     if (text === "/cancel") { await env.DB.delete("draft:" + chat); return send(env, chat, "Ввод отменён.", { reply_markup: ADMIN_KB }); }
     if (text === "➕ Новый заказ" || /^\/new(@\w+)?\s*$/i.test(text)) {
       const d = { by: name }; await draftPut(env, chat, d);
@@ -342,6 +463,7 @@ async function onMessage(env, m) {
 async function onCallback(env, q) {
   const from = q.from, data = q.data || "", msg = q.message;
   const answer = (text, alert = false) => tg(env, "answerCallbackQuery", { callback_query_id: q.id, text, show_alert: alert });
+  if (data.startsWith("rv:")) return onReviewCb(env, q, answer);
   if (!(await isAdmin(env, from.id))) return answer("Недоступно");
   const name = from.first_name || from.username || "админ";
 
@@ -361,6 +483,18 @@ async function onCallback(env, q) {
     return answer(dm[1] === "pub" ? `Будет опубликовано ${slot}` : "Отклонено");
   }
   if (data === "noop") return answer("");
+
+  // проверка отзывов
+  const ra = data.match(/^ra:(IB-\d+):(ok|hide)$/);
+  if (ra) {
+    const r = await getReview(env, ra[1]);
+    if (!r || r.consent === "no") return answer("Недоступно", true);
+    if (r.published) return answer("Уже опубликован", true);
+    r.status = ra[2] === "ok" ? "approved" : "hidden"; r.by = name; r.dts = Date.now();
+    await putReview(env, r);
+    await tg(env, "editMessageReplyMarkup", { chat_id: msg.chat.id, message_id: msg.message_id, reply_markup: reviewKb(r) });
+    return answer(r.status === "approved" ? "Одобрен — выйдет в ближайшую публикацию" : "Скрыт");
+  }
 
   // мастер нового заказа
   const nw = data.match(/^nw:(.+)$/);
@@ -445,6 +579,7 @@ const ADMIN_CMDS = [
   { command: "zakazy", description: "Открытые заказы" },
   { command: "new", description: "Новый заказ" },
   { command: "status", description: "Карточка заказа: /status IB-0001" },
+  { command: "otzyv", description: "Запросить отзыв: /otzyv IB-0001" },
   { command: "cancel", description: "Отменить ввод заказа" },
   { command: "help", description: "Как работать с заказами" },
 ];
@@ -493,6 +628,21 @@ async function api(env, req, url) {
     do { const r = await env.DB.list({ prefix: `fwdm:${b.group}:`, cursor }); for (const k of r.keys) { await env.DB.delete(k.name); n++; } cursor = r.list_complete ? null : r.cursor; } while (cursor);
     return j({ ok: true, deleted: n });
   }
+  if (url.pathname === "/api/reviews") {
+    const reviews = []; let cursor;
+    do { const r = await env.DB.list({ prefix: "review:", cursor }); for (const k of r.keys) { const v = await kvGet(env, k.name); if (v) reviews.push(v); } cursor = r.list_complete ? null : r.cursor; } while (cursor);
+    const st = url.searchParams.get("status");
+    return j({ reviews: reviews.filter(r => !st || (r.status === st && !r.published)).sort((a, b) => a.ts - b.ts) });
+  }
+  if (url.pathname === "/api/reviews/done" && req.method === "POST") {
+    const b = await req.json(); const r = await getReview(env, b.id);
+    if (!r || r.status !== "approved") return j({ ok: false, error: "not approved" });
+    if (!r.published) {
+      r.published = b.post; r.pts = Date.now(); await putReview(env, r);
+      await send(env, r.chat, `Ваш отзыв опубликован, спасибо! https://t.me/buyitru/${b.post}`);
+    }
+    return j({ ok: true });
+  }
   if (url.pathname === "/api/forget" && req.method === "POST") { const b = await req.json(); await env.DB.delete("dec:" + b.key); return j({ ok: true }); }
   return new Response("not found", { status: 404 });
 }
@@ -514,7 +664,9 @@ export default {
   },
   async scheduled(ev, env) {
     // 07:00 UTC = 10:00 МСК — сводка; остальные запуски — только напоминания о просрочках
-    await daily(env, new Date(ev.scheduledTime).getUTCHours() === 7);
+    const morning = new Date(ev.scheduledTime).getUTCHours() === 7;
+    await daily(env, morning);
+    if (morning) await askReviews(env);
   },
 };
 
