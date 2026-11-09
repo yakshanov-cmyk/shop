@@ -100,18 +100,19 @@ function card(o) {
   ].join("\n").replace(/\n{3,}/g, "\n\n");
 }
 function cardKb(o) {
+  if (o.status === "Выдан" && o.clientChat && !o.reviewGot) return { inline_keyboard: [[{ text: "⭐ Запросить отзыв", callback_data: "rq:" + o.id }]] };
   if (["Выдан", "Отменён"].includes(o.status)) return { inline_keyboard: [] };
   const row = (NEXT_BTNS[o.status] || []).map(([t, c]) => ({ text: t, callback_data: `st:${o.id}:${c}` }));
   return { inline_keyboard: [row, [{ text: "✖️ Отменить заказ", callback_data: `st:${o.id}:cancel` }]] };
 }
 
 // ---------- удобное создание заказа (мастер) и список заказов ----------
-const ADMIN_KB = { keyboard: [[{ text: "➕ Новый заказ" }, { text: "📋 Заказы" }], [{ text: "❓ Помощь" }]], resize_keyboard: true, is_persistent: true };
+const ADMIN_KB = { keyboard: [[{ text: "➕ Новый заказ" }, { text: "📋 Заказы" }], [{ text: "⭐ Отзывы" }, { text: "❓ Помощь" }]], resize_keyboard: true, is_persistent: true };
 const HELP = "<b>Как работать с заказами</b>\n\n" +
   "➕ <b>Новый заказ</b> — бот спросит по шагам: товар → цена → доставка → клиент. Заказ создаётся <b>только после кнопки «✅ Создать»</b>, до этого всё можно поправить или отменить.\n" +
   "Быстрее всего: на первом шаге пришлите ссылку на пост канала (t.me/buyitru/13371) или перешлите пост из канала — товар, цена и доставка подставятся сами.\n\n" +
   "📋 <b>Заказы</b> — открытые заказы по статусам, ⚠️ просроченные; нажмите на заказ — откроется карточка с кнопками статусов.\n\n" +
-  "⭐ <b>Отзывы</b> — через 2 дня после «Выдан» бот сам попросит клиента оценить заказ. Отзыв придёт сюда с кнопками «Опубликовать» / «Скрыть». Запросить сразу: /otzyv IB-0001.\n\n" +
+  "⭐ <b>Отзывы</b> — через 2 дня после «Выдан» бот сам попросит клиента оценить заказ. Отзыв придёт сюда с кнопками «Опубликовать» / «Скрыть». Кнопка «⭐ Отзывы» внизу: что ждёт проверки и у кого можно запросить отзыв сразу.\n\n" +
   "Команды: /new — новый заказ, /zakazy — заказы, /status IB-0001 — карточка, /otzyv IB-0001 — запросить отзыв, /cancel — отменить ввод.";
 const CATALOG_URL = "https://yakshanov-cmyk.github.io/shop/catalog.json";
 const DELIV_BY_C = { "1": 1500, "2": 3000, "05": 750 };
@@ -209,7 +210,7 @@ async function setStatus(env, o, status, byName) {
 const REVIEW_AFTER_DAYS = 2;
 const REVIEW_FROM = Date.UTC(2026, 10, 9, 17, 0); // выданные раньше (проверочные заказы) не спрашиваем
 const REVIEW_MAX = 1000;
-const ADMIN_BTNS = ["➕ Новый заказ", "📋 Заказы", "❓ Помощь"];
+const ADMIN_BTNS = ["➕ Новый заказ", "📋 Заказы", "⭐ Отзывы", "❓ Помощь"];
 const CONSENT_TEXT = "Публикация оценки, текста, фото и названия вещи в канале @buyitru и приложении ItalBridge";
 const stars = n => "⭐".repeat(n);
 const getReview = (env, id) => kvGet(env, "review:" + id);
@@ -232,6 +233,25 @@ async function askReview(env, o) {
 async function askReviews(env) {
   const due = (await listOrders(env, false)).filter(o => o.status === "Выдан" && o.clientChat && !o.reviewAsked && o.since >= REVIEW_FROM && days(o.since) >= REVIEW_AFTER_DAYS);
   for (const o of due.slice(0, 10)) await askReview(env, o);
+}
+async function listReviews(env) {
+  const out = []; let cursor;
+  do { const r = await env.DB.list({ prefix: "review:", cursor }); for (const k of r.keys) { const v = await kvGet(env, k.name); if (v) out.push(v); } cursor = r.list_complete ? null : r.cursor; } while (cursor);
+  return out.sort((a, b) => a.ts - b.ts);
+}
+async function reviewsMenu(env) {
+  const reviews = await listReviews(env), got = new Set(reviews.map(r => r.id));
+  const pending = reviews.filter(r => r.status === "pending");
+  const queued = reviews.filter(r => r.status === "approved" && !r.published).length;
+  const done = reviews.filter(r => r.published).length;
+  const can = (await listOrders(env, false)).filter(o => o.status === "Выдан" && o.clientChat && !got.has(o.id) && o.since >= REVIEW_FROM);
+  const rows = [
+    ...pending.slice(0, 20).map(r => [{ text: `🔎 ${r.id} · ${r.rating} ⭐ · ${r.item}`.slice(0, 60), callback_data: "rl:" + r.id }]),
+    ...can.slice(0, 20).map(o => [{ text: `${o.reviewAsked ? "↻" : "⭐"} ${o.id} · ${itemLabel(o)}`.slice(0, 60), callback_data: "rq:" + o.id + ":m" }]),
+  ];
+  const text = ["⭐ <b>Отзывы</b>", `Ждут проверки: <b>${pending.length}</b>`, `Одобрены, выйдут в ближайшую публикацию: <b>${queued}</b>`, `Опубликовано: <b>${done}</b>`, "",
+    can.length ? "⭐ — запросить отзыв у клиента, ↻ — уже спрашивали, запросить ещё раз." : "Запросить отзыв пока не у кого: нужен заказ «Выдан» с привязанным клиентом."].join("\n");
+  return { text, kb: { inline_keyboard: rows } };
 }
 async function askConsent(env, chat, s, from) {
   s.step = "consent"; await rvPut(env, chat, s);
@@ -298,7 +318,7 @@ async function onReviewCb(env, q, answer) {
       name: p[2] === "pub" ? publicName(q.from) : "Покупатель", consent: p[2], consentText: p[2] === "no" ? null : CONSENT_TEXT,
       status: p[2] === "no" ? "private" : "pending", chat, ts: Date.now() };
     await putReview(env, r);
-    o.history.push({ t: msk(), s: "Получен отзыв " + r.rating + "/5" }); await putOrder(env, o);
+    o.reviewGot = true; o.history.push({ t: msk(), s: "Получен отзыв " + r.rating + "/5" }); await putOrder(env, o);
     for (const a of await admins(env)) {
       if (r.photo) await tg(env, "sendPhoto", { chat_id: a, photo: r.photo });
       await send(env, a, reviewText(r), { reply_markup: reviewKb(r) });
@@ -338,6 +358,7 @@ async function onMessage(env, m) {
       return;
     }
     // кнопки нижнего меню и отмена
+    if (text === "⭐ Отзывы") { const r = await reviewsMenu(env); return send(env, chat, r.text, { reply_markup: r.kb }); }
     if (text === "❓ Помощь" || text === "/help") return send(env, chat, HELP, { reply_markup: ADMIN_KB });
     if (text === "📋 Заказы" || /^(\/zakazy|мои заказы|\/orders)(@\w+)?\s*$/i.test(text)) { const r = await ordersMenu(env); return send(env, chat, r.text, { reply_markup: r.kb }); }
     const oz = text.match(/^\/otzyv(?:@\w+)?\s+(IB-\d+)/i);
@@ -484,6 +505,26 @@ async function onCallback(env, q) {
   }
   if (data === "noop") return answer("");
 
+  // меню отзывов и запрос отзыва кнопкой
+  const rl = data.match(/^rl:(IB-\d+)$/);
+  if (rl) {
+    const r = await getReview(env, rl[1]);
+    if (!r) return answer("Отзыв не найден", true);
+    if (r.photo) await tg(env, "sendPhoto", { chat_id: msg.chat.id, photo: r.photo });
+    await send(env, msg.chat.id, reviewText(r), { reply_markup: reviewKb(r) });
+    return answer("");
+  }
+  const rq = data.match(/^rq:(IB-\d+)(:m)?$/);
+  if (rq) {
+    const o = await getOrder(env, rq[1]);
+    if (!o || o.status !== "Выдан" || !o.clientChat) return answer("Запросить нельзя: нужен заказ «Выдан» с привязанным клиентом", true);
+    if (await getReview(env, o.id)) return answer("Отзыв по этому заказу уже получен", true);
+    if (o.reviewAsked && Date.now() - o.reviewAsked < 3600e3) return answer("Запрос уже отправлен меньше часа назад", true);
+    await askReview(env, o);
+    if (rq[2]) { const m = await reviewsMenu(env); await tg(env, "editMessageText", { chat_id: msg.chat.id, message_id: msg.message_id, text: m.text, parse_mode: "HTML", disable_web_page_preview: true, reply_markup: m.kb }); }
+    return answer("Запрос отправлен клиенту");
+  }
+
   // проверка отзывов
   const ra = data.match(/^ra:(IB-\d+):(ok|hide)$/);
   if (ra) {
@@ -629,10 +670,8 @@ async function api(env, req, url) {
     return j({ ok: true, deleted: n });
   }
   if (url.pathname === "/api/reviews") {
-    const reviews = []; let cursor;
-    do { const r = await env.DB.list({ prefix: "review:", cursor }); for (const k of r.keys) { const v = await kvGet(env, k.name); if (v) reviews.push(v); } cursor = r.list_complete ? null : r.cursor; } while (cursor);
     const st = url.searchParams.get("status");
-    return j({ reviews: reviews.filter(r => !st || (r.status === st && !r.published)).sort((a, b) => a.ts - b.ts) });
+    return j({ reviews: (await listReviews(env)).filter(r => !st || (r.status === st && !r.published)) });
   }
   if (url.pathname === "/api/reviews/done" && req.method === "POST") {
     const b = await req.json(); const r = await getReview(env, b.id);

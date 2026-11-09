@@ -87,4 +87,24 @@ order("IB-0021", OWNER, "Выдан"); await msg(OWNER, "/otzyv IB-0021"); take(
 await msg(OWNER, "📋 Заказы"); s = take(); assert.ok(s[0].text.includes("заказ") || s[0].text.includes("Заказ"), "кнопка меню не попала в отзыв"); assert.equal(JSON.parse(store.get("rvw:" + OWNER)).text, "");
 await msg(OWNER, "Отличный сервис"); s = take(); assert.ok(s[0].text.includes("Пришлите фото"));
 await cb(OTHER, "rv:skip"); s = take(); assert.ok(s.at(-1).show_alert, "нет состояния");
+// кнопка «⭐ Отзывы» и запрос из карточки
+store.delete("rvw:" + OWNER);
+for (const k of [...store.keys()]) if (k.startsWith("review:") || k.startsWith("order:")) store.delete(k);
+order("IB-0030", CLIENT); order("IB-0031", CLIENT); order("IB-0003", OWNER, "Выдан", { since: Date.UTC(2026, 10, 7) }); order("IB-0032", null);
+await msg(OWNER, "⭐ Отзывы"); s = take();
+let cbs = s[0].reply_markup.inline_keyboard.flat().map(b => b.callback_data);
+assert.deepEqual(cbs, ["rq:IB-0030:m", "rq:IB-0031:m"], "проверочные и непривязанные не показываем"); assert.ok(s[0].text.includes("Ждут проверки: <b>0</b>"));
+await cb(CLIENT, "rq:IB-0030:m"); assert.equal(take().at(-1).text, "Недоступно", "клиенту нельзя");
+await cb(OWNER, "rq:IB-0030:m"); s = take(); assert.ok(s.some(x => x.chat_id === CLIENT && x.text.startsWith("Как вам заказ"))); assert.ok(s.find(x => x.method === "editMessageText").reply_markup.inline_keyboard[0][0].text.startsWith("↻"));
+await cb(OWNER, "rq:IB-0030:m"); s = take(); assert.ok(s.at(-1).text.includes("меньше часа")); assert.ok(!s.some(x => x.chat_id === CLIENT));
+await cb(CLIENT, "rv:r:IB-0030:5"); take(); await cb(CLIENT, "rv:skip"); take(); await cb(CLIENT, "rv:c:anon"); take();
+await msg(OWNER, "⭐ Отзывы"); s = take(); cbs = s[0].reply_markup.inline_keyboard.flat().map(b => b.callback_data);
+assert.deepEqual(cbs, ["rl:IB-0030", "rq:IB-0031:m"]); assert.ok(s[0].text.includes("Ждут проверки: <b>1</b>"));
+await cb(OWNER, "rl:IB-0030"); s = take(); assert.ok(s[0].text.includes("Отзыв по IB-0030")); assert.equal(s[0].reply_markup.inline_keyboard[0][0].callback_data, "ra:IB-0030:ok");
+await cb(OWNER, "rq:IB-0030"); assert.ok(take().at(-1).text.includes("уже получен"));
+await msg(OWNER, "/status IB-0031"); s = take(); assert.equal(s[0].reply_markup.inline_keyboard[0][0].callback_data, "rq:IB-0031", "кнопка в карточке выданного");
+await msg(OWNER, "/status IB-0030"); s = take(); assert.equal(s[0].reply_markup.inline_keyboard.length, 0, "отзыв получен — кнопки нет");
+await msg(OWNER, "/status IB-0032"); s = take(); assert.equal(s[0].reply_markup.inline_keyboard.length, 0, "клиент не привязан — кнопки нет");
+order("IB-0033", CLIENT, "В Москве"); await msg(OWNER, "/status IB-0033"); s = take(); assert.ok(!JSON.stringify(s[0].reply_markup).includes("rq:"), "не выдан — кнопки нет");
+await cb(OWNER, "rq:IB-0033"); assert.ok(take().at(-1).text.includes("Запросить нельзя"));
 console.log("test-reviews: все проверки пройдены");
