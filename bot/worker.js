@@ -107,24 +107,30 @@ function cardKb(o) {
 }
 
 // ---------- конвертер евро ⇄ USDT (для админов) ----------
-// Курс: 1 € = X USDT. Сначала Bybit (спот EUR/USDT), если недоступен — CoinGecko. Кэш 2 минуты.
+// Курс: 1 € = X USDT. Источники по очереди (Bybit → OKX → Kraken → Coinbase → CoinGecko), первый ответивший. Кэш 2 минуты.
+const FX_SOURCES = [
+  ["Bybit, спот EUR/USDT", "https://api.bybit.com/v5/market/tickers?category=spot&symbol=EURUSDT", j => Number(j?.result?.list?.[0]?.lastPrice)],
+  ["OKX, спот USDT/EUR", "https://www.okx.com/api/v5/market/ticker?instId=USDT-EUR", j => 1 / Number(j?.data?.[0]?.last)],
+  ["Kraken, USDT/EUR", "https://api.kraken.com/0/public/Ticker?pair=USDTEUR", j => { const r = j?.result && Object.values(j.result)[0]; return 1 / Number(r?.c?.[0]); }],
+  ["Coinbase, USDT/EUR", "https://api.coinbase.com/v2/exchange-rates?currency=USDT", j => 1 / Number(j?.data?.rates?.EUR)],
+  ["CoinGecko, USDT/EUR", "https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=eur", j => 1 / Number(j?.tether?.eur)],
+];
+async function fxTry([name, url, pick]) {
+  try {
+    const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (ItalBridgeBot)", "Accept": "application/json" }, signal: AbortSignal.timeout(4000) });
+    if (!res.ok) return { name, error: "HTTP " + res.status };
+    const v = pick(await res.json());
+    return v > 0.5 && v < 2 ? { name, rate: v } : { name, error: "нет цены" };
+  } catch (e) { return { name, error: String(e && e.message || e).slice(0, 80) }; }
+}
 async function usdtPerEur(env) {
   const c = await kvGet(env, "fx:eurusdt");
   if (c && Date.now() - c.ts < 120e3) return c;
-  let r = null;
-  try {
-    const j = await (await fetch("https://api.bybit.com/v5/market/tickers?category=spot&symbol=EURUSDT", { headers: { "User-Agent": "ItalBridgeBot" } })).json();
-    const v = Number(j?.result?.list?.[0]?.lastPrice);
-    if (v > 0.5 && v < 2) r = { rate: v, src: "Bybit, спот EUR/USDT" };
-  } catch (e) {}
-  if (!r) try {
-    const j = await (await fetch("https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=eur")).json();
-    const v = Number(j?.tether?.eur);
-    if (v > 0.5 && v < 2) r = { rate: 1 / v, src: "CoinGecko (Bybit недоступен)" };
-  } catch (e) {}
-  if (!r) return c ? { ...c, stale: true } : null;
-  r.ts = Date.now(); await kvPut(env, "fx:eurusdt", r);
-  return r;
+  for (const s of FX_SOURCES) {
+    const t = await fxTry(s);
+    if (t.rate) { const r = { rate: t.rate, src: t.name, ts: Date.now() }; await kvPut(env, "fx:eurusdt", r); return r; }
+  }
+  return c ? { ...c, stale: true } : null;
 }
 const num = (n, d = 2) => n.toLocaleString("ru-RU", { minimumFractionDigits: d, maximumFractionDigits: d }).replace(/[\u00a0\u202f]/g, " ");
 const FX_RE = /^(\d[\d\s]*(?:[.,]\d+)?)\s*(€|евро|eur|euro|usdt|юсдт|\$t)\s*$/i;
@@ -688,6 +694,7 @@ async function daily(env, summary) {
 
 // ---------- API для задачи по расписанию ----------
 async function api(env, req, url) {
+  if (url.pathname === "/api/fxcheck") return new Response(JSON.stringify(await Promise.all(FX_SOURCES.map(fxTry)), null, 1), { headers: { "Content-Type": "application/json; charset=utf-8" } });
   const key = req.headers.get("X-Api-Key"); if (!key || (key !== env.API_KEY && key !== env.BOT_TOKEN)) return new Response("forbidden", { status: 403 });
   const j = o => new Response(JSON.stringify(o), { headers: { "Content-Type": "application/json" } });
   if (url.pathname === "/api/state") {
