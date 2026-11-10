@@ -106,13 +106,45 @@ function cardKb(o) {
   return { inline_keyboard: [row, [{ text: "✖️ Отменить заказ", callback_data: `st:${o.id}:cancel` }]] };
 }
 
+// ---------- конвертер евро ⇄ USDT (для админов) ----------
+// Курс: 1 € = X USDT. Сначала Bybit (спот EUR/USDT), если недоступен — CoinGecko. Кэш 2 минуты.
+async function usdtPerEur(env) {
+  const c = await kvGet(env, "fx:eurusdt");
+  if (c && Date.now() - c.ts < 120e3) return c;
+  let r = null;
+  try {
+    const j = await (await fetch("https://api.bybit.com/v5/market/tickers?category=spot&symbol=EURUSDT", { headers: { "User-Agent": "ItalBridgeBot" } })).json();
+    const v = Number(j?.result?.list?.[0]?.lastPrice);
+    if (v > 0.5 && v < 2) r = { rate: v, src: "Bybit, спот EUR/USDT" };
+  } catch (e) {}
+  if (!r) try {
+    const j = await (await fetch("https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=eur")).json();
+    const v = Number(j?.tether?.eur);
+    if (v > 0.5 && v < 2) r = { rate: 1 / v, src: "CoinGecko (Bybit недоступен)" };
+  } catch (e) {}
+  if (!r) return c ? { ...c, stale: true } : null;
+  r.ts = Date.now(); await kvPut(env, "fx:eurusdt", r);
+  return r;
+}
+const num = (n, d = 2) => n.toLocaleString("ru-RU", { minimumFractionDigits: d, maximumFractionDigits: d }).replace(/[\u00a0\u202f]/g, " ");
+const FX_RE = /^(\d[\d\s]*(?:[.,]\d+)?)\s*(€|евро|eur|euro|usdt|юсдт|\$t)\s*$/i;
+async function fxReply(env, amount, cur) {
+  const r = await usdtPerEur(env);
+  if (!r) return "Не удалось получить курс USDT. Посмотрите в «Конвертации» Bybit.";
+  const toUsdt = !/usdt|юсдт|\$t/i.test(cur);
+  const line = toUsdt ? `💱 <b>${num(amount)} € = ${num(amount * r.rate)} USDT</b>` : `💱 <b>${num(amount)} USDT = ${num(amount / r.rate)} €</b>`;
+  return line + `\n\nКурс: 1 € = ${num(r.rate, 4)} USDT · 1 USDT = ${num(1 / r.rate, 4)} €\n${esc(r.src)}, ${msk(r.ts)}` + (r.stale ? " ⚠️ курс устарел" : "") +
+    "\n\nОриентир. Точную сумму для перевода поставщику смотрите в «Конвертации» Bybit в момент обмена и отправьте ей скриншот. Комиссию сети за перевод USDT добавьте сверху.";
+}
+
 // ---------- удобное создание заказа (мастер) и список заказов ----------
-const ADMIN_KB = { keyboard: [[{ text: "➕ Новый заказ" }, { text: "📋 Заказы" }], [{ text: "⭐ Отзывы" }, { text: "❓ Помощь" }]], resize_keyboard: true, is_persistent: true };
+const ADMIN_KB = { keyboard: [[{ text: "➕ Новый заказ" }, { text: "📋 Заказы" }], [{ text: "💱 Евро → USDT" }, { text: "⭐ Отзывы" }, { text: "❓ Помощь" }]], resize_keyboard: true, is_persistent: true };
 const HELP = "<b>Как работать с заказами</b>\n\n" +
   "➕ <b>Новый заказ</b> — бот спросит по шагам: товар → цена → доставка → клиент. Заказ создаётся <b>только после кнопки «✅ Создать»</b>, до этого всё можно поправить или отменить.\n" +
   "Быстрее всего: на первом шаге пришлите ссылку на пост канала (t.me/buyitru/13371) или перешлите пост из канала — товар, цена и доставка подставятся сами.\n\n" +
   "📋 <b>Заказы</b> — открытые заказы по статусам, ⚠️ просроченные; нажмите на заказ — откроется карточка с кнопками статусов.\n\n" +
   "⭐ <b>Отзывы</b> — через 2 дня после «Выдан» бот сам попросит клиента оценить заказ. Отзыв придёт сюда с кнопками «Опубликовать» / «Скрыть». Кнопка «⭐ Отзывы» внизу: что ждёт проверки и у кого можно запросить отзыв сразу.\n\n" +
+  "💱 <b>Евро → USDT</b> — напишите сумму, например <code>500 евро</code> или <code>500€</code>, — бот ответит, сколько это в USDT по текущему курсу. Обратно: <code>560 usdt</code>.\n\n" +
   "Команды: /new — новый заказ, /zakazy — заказы, /status IB-0001 — карточка, /otzyv IB-0001 — запросить отзыв, /cancel — отменить ввод.";
 const CATALOG_URL = "https://yakshanov-cmyk.github.io/shop/catalog.json";
 const DELIV_BY_C = { "1": 1500, "2": 3000, "05": 750 };
@@ -210,7 +242,7 @@ async function setStatus(env, o, status, byName) {
 const REVIEW_AFTER_DAYS = 2;
 const REVIEW_FROM = Date.UTC(2026, 10, 9, 17, 0); // выданные раньше (проверочные заказы) не спрашиваем
 const REVIEW_MAX = 1000;
-const ADMIN_BTNS = ["➕ Новый заказ", "📋 Заказы", "⭐ Отзывы", "❓ Помощь"];
+const ADMIN_BTNS = ["➕ Новый заказ", "📋 Заказы", "💱 Евро → USDT", "⭐ Отзывы", "❓ Помощь"];
 const CONSENT_TEXT = "Публикация оценки, текста, фото и названия вещи в канале @buyitru и приложении ItalBridge";
 const stars = n => "⭐".repeat(n);
 const getReview = (env, id) => kvGet(env, "review:" + id);
@@ -372,6 +404,18 @@ async function onMessage(env, m) {
       return send(env, chat, `⭐ Запрос отзыва по ${o.id} отправлен клиенту.`);
     }
     if (text === "/cancel") { await env.DB.delete("draft:" + chat); return send(env, chat, "Ввод отменён.", { reply_markup: ADMIN_KB }); }
+    // конвертер евро ⇄ USDT
+    const isFwd = m.forward_origin || m.forward_date;
+    if (!isFwd && (text === "💱 Евро → USDT" || /^\/usdt(@\w+)?\s*$/i.test(text))) {
+      const r = await usdtPerEur(env);
+      return send(env, chat, (r ? `💱 Сейчас 1 € = ${num(r.rate, 4)} USDT (${esc(r.src)}, ${msk(r.ts)}).\n\n` : "") +
+        "Напишите сумму: <code>500 евро</code>, <code>500€</code> — посчитаю в USDT. Обратно: <code>560 usdt</code>.", { reply_markup: ADMIN_KB });
+    }
+    const fx = !isFwd && (text.match(FX_RE) || text.match(/^\/usdt(?:@\w+)?\s+(\d[\d\s]*(?:[.,]\d+)?)()\s*$/i));
+    if (fx) {
+      const amount = Number(fx[1].replace(/\s/g, "").replace(",", "."));
+      if (amount > 0) return send(env, chat, await fxReply(env, amount, fx[2] || "€"), { reply_markup: ADMIN_KB });
+    }
     if (text === "➕ Новый заказ" || /^\/new(@\w+)?\s*$/i.test(text)) {
       const d = { by: name }; await draftPut(env, chat, d);
       return draftNext(env, chat, d);
@@ -621,6 +665,7 @@ const ADMIN_CMDS = [
   { command: "new", description: "Новый заказ" },
   { command: "status", description: "Карточка заказа: /status IB-0001" },
   { command: "otzyv", description: "Запросить отзыв: /otzyv IB-0001" },
+  { command: "usdt", description: "Евро → USDT: /usdt 500" },
   { command: "cancel", description: "Отменить ввод заказа" },
   { command: "help", description: "Как работать с заказами" },
 ];
