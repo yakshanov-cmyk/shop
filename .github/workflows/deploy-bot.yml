@@ -1,0 +1,19 @@
+name: Выкладка бота в Cloudflare
+on:
+  push:
+    branches: [main]
+    paths: ["bot/worker.js"]
+  workflow_dispatch:
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Загрузить код бота (секреты и webhook не трогаются)
+        env:
+          CF_TOKEN: ${{ secrets.CF_TOKEN }}
+          CF_ACCOUNT: a7680d79328fd3c5884d181edac368cd
+        run: |
+          if [ -z "$CF_TOKEN" ]; then echo "Нет секрета CF_TOKEN в настройках репозитория"; exit 1; fi
+          bash bot/update.sh | tee out.txt
+          grep -q "upload ok" out.txt
