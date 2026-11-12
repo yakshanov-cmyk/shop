@@ -200,8 +200,9 @@ button:disabled { opacity: .45; cursor: default; }
 /* ===================== CONFIG — НАСТРОЙКИ ===================== */
 const CONFIG = {
 KURS: 97.8, // ₽ за 1 € — ЗАПАСНОЙ курс (Т-Банк, продажа €, обновлено 12.11.2026). Обычно курс приходит в ссылке (k97d2 / ?k=97.2)
-NACENKA: 1.10, // +10 %
-FIX: 1500, // фиксированная часть, ₽
+NACENKA: 1.20, // +20 % (формула 2, с 12.11.2026: 10 % нам + 10 % байеру)
+FIX: 0, // фиксированной части нет (формула 2)
+OLD_NACENKA: 1.10, OLD_FIX: 1500, // формула 1 — посты до 12.11.2026 (в ссылке и каталоге нет f2)
 DOSTAVKA_KG: 1500, // доставка, ₽ за 1 кг
 ROUND: 100, // округление вверх до … ₽
 MANAGER: "LanaY777", // ник менеджера в Telegram БЕЗ @
@@ -247,6 +248,7 @@ if (k === "p" && /^\d+$/.test(v)) out.post = v;
 if (k === "e" && /^\d+(d\d+)?$/.test(v)) out.eur = parseFloat(v.replace("d", "."));
 if (k === "o" && /^\d+(d\d+)?$/.test(v)) out.old = parseFloat(v.replace("d", "."));
 if (k === "c" && ["1", "2", "05"].includes(v)) out.cat = v === "05" ? "0.5" : v;
+if (part === "f2") out.f = 2;
 if (k === "k" && /^\d+(d\d+)?$/.test(v)) out.kurs = okKurs(parseFloat(v.replace("d", ".")));
 });
 return out;
@@ -258,7 +260,8 @@ let KURS = product.kurs
 || okKurs(parseFloat(String(new URLSearchParams(location.search).get("k") || "").replace(",", ".")))
 || CONFIG.KURS;
 let productKurs = KURS;
-const priceAt = (eur, k) => ceilTo(eur * k * CONFIG.NACENKA + CONFIG.FIX, CONFIG.ROUND);
+const priceAt = (eur, k, f = 2) => f === 2 ? ceilTo(eur * k * CONFIG.NACENKA + CONFIG.FIX, CONFIG.ROUND) : ceilTo(eur * k * CONFIG.OLD_NACENKA + CONFIG.OLD_FIX, CONFIG.ROUND);
+const formulaOf = p => p && (p.post || p.eur) ? (p.f === 2 ? 2 : 1) : 2; // товар из старого поста — по старой формуле, ручной расчёт — по новой
 const kursNow = p => (LIVE && LIVE.kurs) || (p && p.kurs) || KURS;
 function kursNote(p) {
   const k = String(productKurs).replace(".", ",");
@@ -280,7 +283,7 @@ last = null;
 $("result").innerHTML = '<div class="empty">Введите цену в евро — покажем стоимость в рублях под ключ.</div>';
 return;
 }
-const price = priceAt(eur, productKurs);
+const price = priceAt(eur, productKurs, formulaOf(product));
 const delivery = Math.round(kg * CONFIG.DOSTAVKA_KG);
 last = { eur, price, delivery, total: price + delivery };
 $("result").innerHTML =
@@ -324,7 +327,7 @@ function showProduct(p) {
   if (p.eur) {
     $("eur").value = String(p.eur).replace(".", ",");
     if (p.old && p.old > p.eur) {
-      const oldRub = priceAt(p.old, productKurs);
+      const oldRub = priceAt(p.old, productKurs, formulaOf(p));
       $("oldprice").hidden = false;
       $("oldprice").innerHTML = "Без скидки: <s>" + rub(oldRub) + "</s> · скидка " +
         Math.round((1 - p.eur / p.old) * 100) + " %";
@@ -415,7 +418,7 @@ function render() {
       (i.disc ? '<span class="badge">−' + i.disc + '%</span>' : '') + '</span></div>';
     b.addEventListener("click", () => {
       showProduct({ post: String(i.post), eur: i.eur, old: i.oldEur || undefined,
-        cat: i.c === "05" ? "0.5" : i.c, kurs: okKurs(i.k) || undefined, info: i });
+        cat: i.c === "05" ? "0.5" : i.c, kurs: okKurs(i.k) || undefined, f: i.f === 2 ? 2 : 1, info: i });
       cameFromCatalog = true;
       setTab("calc");
     });
@@ -502,8 +505,8 @@ function repriceCatalog() {
   ALL_ITEMS.forEach(i => {
     if (!i.eur) return;
     if (i.pricePub == null) { i.pricePub = i.price; i.oldPub = i.old; }
-    i.price = priceAt(i.eur, LIVE.kurs);
-    if (i.oldEur) i.old = priceAt(i.oldEur, LIVE.kurs);
+    i.price = priceAt(i.eur, LIVE.kurs, i.f === 2 ? 2 : 1);
+    if (i.oldEur) i.old = priceAt(i.oldEur, LIVE.kurs, i.f === 2 ? 2 : 1);
   });
 }
 const kursCtl = typeof AbortController !== "undefined" ? new AbortController() : null;

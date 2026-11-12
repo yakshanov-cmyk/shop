@@ -109,7 +109,8 @@ def kurs():
 
 
 def price_rub(eur, k):
-    return int(math.ceil((eur * k * 1.10 + 1500) / 100 - 1e-9) * 100)
+    # формула 2 (с 12.11.2026): евро × курс Т-Банка × 1,20, вверх до 100 ₽; доставка отдельно
+    return int(math.ceil((eur * k * 1.20) / 100 - 1e-9) * 100)
 
 
 def price_tag(p):
@@ -243,9 +244,11 @@ def do_draft(group):
     order = [photos[mi]] + [p for i, p in enumerate(photos) if i != mi]
     out = card(order[:3], a["brand"], a["title"][0].upper() + a["title"][1:], price, old, disc, a.get("colors"), f"{TMP}/card.jpg")
     html = build_caption(a, price, old, disc)
-    startapp = f"e{dnum(eur)}" + (f"_o{dnum(old_eur)}" if old else "") + f"_c{a['weight']}_k{dnum(round(k, 2))}"
-    calc = f"{eur:g} € × {str(round(k, 2)).replace('.', ',')} × 1,10 + 1 500 → {rub(price)}"
+    startapp = f"e{dnum(eur)}" + (f"_o{dnum(old_eur)}" if old else "") + f"_c{a['weight']}_k{dnum(round(k, 2))}_f2"
+    calc = f"{eur:g} € × {str(round(k, 2)).replace('.', ',')} × 1,20 → {rub(price)}"
     priv = ["", "———", "🔒 Только для вас (в канал не попадёт):", src_line, f"Курс: {str(round(k, 2)).replace('.', ',')} · {calc}", f"Вес: {a['weight'].replace('05', '0,5')} кг"]
+    if not disc or disc < 40:
+        priv.append("⚠️ Скидка меньше 40 % — проверьте, что вещь выгоднее, чем в российских магазинах")
     if a.get("_fallback"):
         priv.append("⚠️ ИИ не ответил — тип вещи не определён, лучше отклонить и переслать позже")
     caption = "⚡ ЧЕРНОВИК — после ✅ выйдет сразу\n\n" + html + "\n" + "\n".join(priv)
@@ -255,7 +258,7 @@ def do_draft(group):
         res = tg("sendPhoto", files={"photo": ("card.jpg", fh, "image/jpeg")}, chat_id=OWNER, caption=caption, parse_mode="HTML", reply_markup=kb)
     file_id = res["photo"][-1]["file_id"]
     item = {"brand": a["brand"], "title": a["title"], "price": price, "old": old, "disc": disc, "eur": eur, "oldEur": old_eur if old else None,
-            "c": a["weight"], "k": round(k, 2), "cat": a["category"], "men": bool(a.get("men")), "sale": bool(old)}
+            "c": a["weight"], "k": round(k, 2), "cat": a["category"], "men": bool(a.get("men")), "sale": bool(old), "f": 2}
     api("/api/idraft", {"key": key, "html": html, "file_id": file_id, "startapp": startapp, "item": item, "srcDate": g["date"],
                         "chat": OWNER, "msg": res["message_id"], "brand_tag": a["brand_tag"], "ts": int(time.time() * 1000)})
     api("/api/queue/done", {"group": group})
@@ -323,7 +326,7 @@ def do_publish(key):
         cat = json.load(open(cpath, encoding="utf-8"))
         if not any(i.get("post") == n for i in cat["items"]):
             it = dict(d["item"]); it.update({"post": n, "date": dt.datetime.now(MSK).strftime("%Y-%m-%d"), "img": f"img/{n}.jpg"})
-            cat["items"].insert(0, {k: it.get(k) for k in ["post", "brand", "title", "price", "old", "disc", "eur", "oldEur", "c", "k", "cat", "men", "sale", "date", "img"]})
+            cat["items"].insert(0, {k: it.get(k) for k in ["post", "brand", "title", "price", "old", "disc", "eur", "oldEur", "c", "k", "cat", "men", "sale", "date", "img"] + (["f"] if it.get("f") else [])})
             cat["updated"] = dt.datetime.now(MSK).strftime("%Y-%m-%d")
             json.dump(cat, open(cpath, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
         added = add_brand_to_nav(d.get("brand_tag") or re.sub(r"[^A-Za-z0-9]", "", d["item"]["brand"]))
