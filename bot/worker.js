@@ -461,12 +461,15 @@ async function onMessage(env, m) {
       const photo = m.photo ? m.photo[m.photo.length - 1].file_id : (m.document && /^image\//.test(m.document.mime_type || "") ? m.document.file_id : null);
       await kvPut(env, `fwdm:${group}:${String(m.message_id).padStart(10, "0")}`,
         { src, srcMsg: fo.message_id || null, date, photo, text: m.caption || m.text || "", by: name, ts: Date.now() }, { expirationTtl: 7 * 86400 });
-      if (!m.media_group_id || m.caption) {
-        const age = (Date.now() - date) / 3600e3;
-        return send(env, chat, `📥 Принято в очередь черновиков: <b>${esc(src)}</b>, пост от ${msk(date)}.` +
-          (age > 48 ? "\n⚠️ Посту больше 2 суток — по правилу свежести в черновик не попадёт." : "\nПопадёт в ближайшие черновики (~9:00 / ~19:00)."));
-      }
-      return;
+      // первый кусок альбома (или одиночный пост) — отвечаем и запускаем мгновенный черновик
+      const first = !(await env.DB.get("fwdg:" + group));
+      if (!first) return;
+      await env.DB.put("fwdg:" + group, "1", { expirationTtl: 86400 });
+      const age = (Date.now() - date) / 3600e3;
+      if (age > 48) return send(env, chat, `📥 Принято: <b>${esc(src)}</b>, пост от ${msk(date)}.\n⚠️ Посту больше 2 суток — по правилу свежести в черновик не попадёт.`);
+      const ok = await ghDispatch(env, "draft", { group });
+      return send(env, chat, `📥 Принято: <b>${esc(src)}</b>, пост от ${msk(date)}.` +
+        (ok ? "\n⚡ Черновик с карточкой придёт сюда через ~1–2 минуты." : "\nПопадёт в ближайшие черновики (~9:00 / ~19:00)."));
     }
     if (/^(\/new(@\w+)?|новый заказ)/i.test(text)) {
       const p = parseNewOrder(text);
@@ -537,6 +540,31 @@ async function onCallback(env, q) {
   if (data.startsWith("rv:")) return onReviewCb(env, q, answer);
   if (!(await isAdmin(env, from.id))) return answer("Недоступно");
   const name = from.first_name || from.username || "админ";
+
+  // мгновенные черновики (из пересылки): ✅ — публикуем сразу
+  const im = data.match(/^(ipub|irej):(.+)$/);
+  if (im) {
+    const key = "dec:" + im[2];
+    const prev = await kvGet(env, key, {});
+    if (prev.published) return answer("Уже опубликовано");
+    const keep = (msg.reply_markup?.inline_keyboard || []).flat().filter(b => b.url && !/t\.me\/buyitru\//.test(b.url));
+    const rows = kb => ({ inline_keyboard: [...(keep.length ? [keep] : []), ...kb] });
+    if (im[1] === "ipub") {
+      if (prev.d === "pub" && prev.instant && Date.now() - (prev.ts || 0) < 5 * 60e3) return answer("Уже публикую — подождите минуту");
+      await kvPut(env, key, { ...prev, d: "pub", instant: true, chat: msg.chat.id, msg: msg.message_id, ts: Date.now() });
+      const ok = await ghDispatch(env, "publish", { key: im[2] });
+      if (!ok) {
+        await kvPut(env, key, { ...prev, d: "pub", chat: msg.chat.id, msg: msg.message_id, ts: Date.now() });
+        await tg(env, "editMessageReplyMarkup", { chat_id: msg.chat.id, message_id: msg.message_id, reply_markup: rows([[{ text: "✅ В очереди: ~10:00 / ~20:00", callback_data: "noop" }]]) });
+        return answer("Сразу не получилось — опубликую в ближайшее окно", true);
+      }
+      await tg(env, "editMessageReplyMarkup", { chat_id: msg.chat.id, message_id: msg.message_id, reply_markup: rows([[{ text: "⏳ Публикую… (~1 мин)", callback_data: "noop" }]]) });
+      return answer("Публикую — пост выйдет примерно через минуту");
+    }
+    await kvPut(env, key, { ...prev, d: "rej", instant: true, chat: msg.chat.id, msg: msg.message_id, ts: Date.now() });
+    await tg(env, "editMessageReplyMarkup", { chat_id: msg.chat.id, message_id: msg.message_id, reply_markup: rows([[{ text: "❌ Отклонён", callback_data: "noop" }], [{ text: "✅ Всё же опубликовать", callback_data: "ipub:" + im[2] }]]) });
+    return answer("Отклонено");
+  }
 
   // черновики постов
   const dm = data.match(/^(pub|rej):(.+)$/);
@@ -735,8 +763,23 @@ async function api(env, req, url) {
     }
     return j({ ok: true });
   }
+  if (url.pathname === "/api/idraft" && req.method === "POST") { const b = await req.json(); if (!b.key) return j({ ok: false }); await kvPut(env, "idraft:" + b.key, b, { expirationTtl: 14 * 86400 }); return j({ ok: true }); }
+  if (url.pathname === "/api/idraft") { const v = await kvGet(env, "idraft:" + (url.searchParams.get("key") || "")); return j(v || { missing: true }); }
+  if (url.pathname === "/api/dec") { const v = await kvGet(env, "dec:" + (url.searchParams.get("key") || ""), {}); return j(v); }
   if (url.pathname === "/api/forget" && req.method === "POST") { const b = await req.json(); await env.DB.delete("dec:" + b.key); return j({ ok: true }); }
   return new Response("not found", { status: 404 });
+}
+
+// ---------- мгновенные черновики: запуск GitHub Actions (yakshanov-cmyk/shop, .github/workflows/instant.yml) ----------
+async function ghDispatch(env, type, payload) {
+  if (!env.GH_TOKEN) return false;
+  try {
+    const r = await fetch("https://api.github.com/repos/yakshanov-cmyk/shop/dispatches", { method: "POST",
+      headers: { "Authorization": "Bearer " + env.GH_TOKEN, "Accept": "application/vnd.github+json", "User-Agent": "ItalBridge-bot", "Content-Type": "application/json" },
+      body: JSON.stringify({ event_type: type, client_payload: payload }) });
+    if (r.status !== 204) console.log("gh dispatch", r.status, await r.text());
+    return r.status === 204;
+  } catch (e) { console.log("gh dispatch", String(e)); return false; }
 }
 
 // ---------- живой курс € Т-Банка (для мини-приложения) ----------
