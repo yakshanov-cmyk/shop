@@ -164,7 +164,7 @@ def fallback(text):
     cat = "сумки" if re.search(r"сумк|bag|рюкзак|клатч", t) else "обувь" if re.search(r"взутт|обув|кросівк|кроссовк|туфл|черевик|ботин|сапог|чоботи|лофер", t) \
         else "аксессуары" if re.search(r"ремін|ремень|окуляр|очки|гаманець|кошел|шарф|хуст|прикрас|годинник|час", t) \
         else "косметика" if re.search(r"космет|парфум|парфюм|крем|адвент", t) else "одежда"
-    return {"brand": brand, "brand_tag": tag, "title": "новинка", "category": cat, "weight": "2" if cat == "обувь" else "05" if cat == "аксессуары" else "1",
+    return {"brand": brand, "brand_tag": tag, "title": {"сумки": "сумка", "обувь": "обувь", "аксессуары": "аксессуар", "косметика": "косметика"}.get(cat, "новинка"), "category": cat, "weight": "2" if cat == "обувь" else "05" if cat == "аксессуары" else "1",
             "sized": cat in ("одежда", "обувь"), "size": None, "colors": None, "men": False, "main_photo": 0, "skip": None, "_fallback": True}
 
 
@@ -248,7 +248,7 @@ def do_draft(group):
     priv = ["", "———", "🔒 Только для вас (в канал не попадёт):", src_line, f"Курс: {str(round(k, 2)).replace('.', ',')} · {calc}", f"Вес: {a['weight'].replace('05', '0,5')} кг"]
     if a.get("_fallback"):
         priv.append("⚠️ ИИ не ответил — тип вещи не определён, лучше отклонить и переслать позже")
-    caption = "⚡ ЧЕРНОВИК — после ✅ выйдет сразу\n\n" + html + "\n".join(priv)
+    caption = "⚡ ЧЕРНОВИК — после ✅ выйдет сразу\n\n" + html + "\n" + "\n".join(priv)
     kb = {"inline_keyboard": [[{"text": "💶 Цена и заказ (проверка)", "url": f"https://t.me/ItalBridgeBot/shop?startapp={startapp}"}],
                               [{"text": "✅ Опубликовать сразу", "callback_data": f"ipub:{key}"}, {"text": "❌ Отклонить", "callback_data": f"irej:{key}"}]]}
     with open(out, "rb") as fh:
