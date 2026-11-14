@@ -1,6 +1,42 @@
 {
- "updated": "2026-11-12",
+ "updated": "2026-11-14",
  "items": [
+  {
+   "post": 13488,
+   "brand": "Coccinelle",
+   "title": "сумка-хобо",
+   "price": 21700,
+   "old": null,
+   "disc": null,
+   "eur": 165,
+   "oldEur": null,
+   "c": "1",
+   "k": 109.4,
+   "cat": "сумки",
+   "men": false,
+   "sale": false,
+   "date": "2026-11-14",
+   "img": "img/13488.jpg",
+   "f": 2
+  },
+  {
+   "post": 13487,
+   "brand": "Coccinelle",
+   "title": "сумка-мешок",
+   "price": 19600,
+   "old": null,
+   "disc": null,
+   "eur": 149,
+   "oldEur": null,
+   "c": "1",
+   "k": 109.4,
+   "cat": "сумки",
+   "men": false,
+   "sale": false,
+   "date": "2026-11-14",
+   "img": "img/13487.jpg",
+   "f": 2
+  },
   {
    "post": 13484,
    "brand": "Balmain",
