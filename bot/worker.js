@@ -750,6 +750,13 @@ async function api(env, req, url) {
     do { const r = await env.DB.list({ prefix: `fwdm:${b.group}:`, cursor }); await Promise.all(r.keys.map(k => env.DB.delete(k.name))); n += r.keys.length; cursor = r.list_complete ? null : r.cursor; } while (cursor);
     return j({ ok: true, deleted: n });
   }
+  if (url.pathname === "/api/ghtest") {
+    if (!env.GH_TOKEN) return j({ ok: false, error: "GH_TOKEN не задан" });
+    const r = await fetch("https://api.github.com/repos/yakshanov-cmyk/shop/dispatches", { method: "POST",
+      headers: { "Authorization": "Bearer " + env.GH_TOKEN, "Accept": "application/vnd.github+json", "User-Agent": "ItalBridge-bot", "Content-Type": "application/json" },
+      body: JSON.stringify({ event_type: "draft", client_payload: { group: "ghtest" } }) });
+    return j({ ok: r.status === 204, status: r.status, body: (await r.text()).slice(0, 300), tokenPrefix: env.GH_TOKEN.slice(0, 11), len: env.GH_TOKEN.length });
+  }
   if (url.pathname === "/api/reviews") {
     const st = url.searchParams.get("status");
     return j({ reviews: (await listReviews(env)).filter(r => !st || (r.status === st && !r.published)) });
