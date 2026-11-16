@@ -6,7 +6,7 @@ permissions:
   contents: write
   models: read
 concurrency:
-  group: instant-${{ github.event.action }}
+  group: instant-${{ github.event.action }}-${{ github.event.client_payload.group || github.event.client_payload.key }}
   cancel-in-progress: false
 jobs:
   run:
