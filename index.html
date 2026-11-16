@@ -199,7 +199,7 @@ button:disabled { opacity: .45; cursor: default; }
 <script>
 /* ===================== CONFIG — НАСТРОЙКИ ===================== */
 const CONFIG = {
-KURS: 109.4, // ₽ за 1 € — ЗАПАСНОЙ курс (Т-Банк, продажа €, обновлено 14.11.2026). Обычно курс приходит в ссылке (k97d2 / ?k=97.2)
+KURS: 95.58, // ₽ за 1 € — ЗАПАСНОЙ курс (ЦБ × 1,05, обновлено 16.11.2026). Обычно курс приходит в ссылке (k97d2 / ?k=97.2)
 NACENKA: 1.20, // +20 % (формула 2, с 12.11.2026: 10 % нам + 10 % байеру)
 FIX: 0, // фиксированной части нет (формула 2)
 OLD_NACENKA: 1.10, OLD_FIX: 1500, // формула 1 — посты до 12.11.2026 (в ссылке и каталоге нет f2)
@@ -254,7 +254,8 @@ if (k === "k" && /^\d+(d\d+)?$/.test(v)) out.kurs = okKurs(parseFloat(v.replace(
 return out;
 }
 let product = parseProduct(startParam());
-const KURS_URL = "https://italbridge.italbridge-1cd0ad.workers.dev/kurs";
+const KURS_URL = "https://www.cbr-xml-daily.ru/daily_json.js"; // курс ЦБ (с 16.11.2026 цены считаются от ЦБ × 1,05)
+const KURS_K = 1.05;
 let LIVE = null; // живой курс {kurs, ts}
 let KURS = product.kurs
 || okKurs(parseFloat(String(new URLSearchParams(location.search).get("k") || "").replace(",", ".")))
@@ -267,7 +268,7 @@ function kursNote(p) {
   const k = String(productKurs).replace(".", ",");
   if (LIVE && LIVE.kurs) {
     const d = new Date(LIVE.ts + 3 * 3600e3), hh = String(d.getUTCHours()).padStart(2, "0"), mm = String(d.getUTCMinutes()).padStart(2, "0");
-    let t = "Курс Т-Банка сегодня: 1 € = " + k + " ₽ (на " + hh + ":" + mm + " МСК).";
+    let t = "Курс евро сегодня: 1 € = " + k + " ₽.";
     if (p && p.kurs && Math.abs(p.kurs - LIVE.kurs) >= 0.05) t += " Цена пересчитана по сегодняшнему курсу — в посте она по курсу на день публикации (" + String(p.kurs).replace(".", ",") + " ₽).";
     return t + " Точную цену подтвердит менеджер.";
   }
@@ -512,9 +513,9 @@ function repriceCatalog() {
 const kursCtl = typeof AbortController !== "undefined" ? new AbortController() : null;
 setTimeout(() => kursCtl && kursCtl.abort(), 3000);
 fetch(KURS_URL, kursCtl ? { signal: kursCtl.signal } : {}).then(r => r.ok ? r.json() : null).then(d => {
-  const k = d && okKurs(Number(d.kurs));
+  const k = d && d.Valute && d.Valute.EUR && okKurs(Math.round(Number(d.Valute.EUR.Value) * KURS_K * 100) / 100);
   if (!k) return;
-  LIVE = { kurs: k, ts: d.ts || Date.now() };
+  LIVE = { kurs: k, ts: Date.parse(d.Date) || Date.now() };
   KURS = k;
   repriceCatalog();
   if (ITEMS.length) render();

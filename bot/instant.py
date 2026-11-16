@@ -99,7 +99,8 @@ def parse_prices(text):
 
 def kurs():
     try:
-        k = float(requests.get(W + "/kurs", timeout=20).json()["kurs"])
+        # с 16.11.2026: курс ЦБ × 1,05 (карточный курс Т-Банка недоступен автоматически; bankiros даёт курс наличных)
+        k = round(float(requests.get("https://www.cbr-xml-daily.ru/daily_json.js", timeout=20).json()["Valute"]["EUR"]["Value"]) * 1.05, 2)
         if 60 < k < 150:
             return k
     except Exception:
