@@ -784,20 +784,37 @@ async function ghDispatch(env, type, payload) {
 
 // ---------- живой курс € Т-Банка (для мини-приложения) ----------
 const KURS_TTL = 2 * 3600e3; // обновлять не реже раза в 2 часа
+// С 16.11.2026: bankiros отдаёт курс НАЛИЧНЫХ Т-Банка (109,4 при карточном 95,35) — не используем.
+// 1) официальный API Т-Банка, категория карт/переводов: sell = банк продаёт € = клиент покупает;
+// 2) если API не ответил или курс странный — ЦБ × 1,05 (решение пользователя 16.11.2026).
+async function fetchCbr() {
+  const r = await fetch("https://www.cbr-xml-daily.ru/daily_json.js", { cf: { cacheTtl: 600 } });
+  if (!r.ok) throw new Error("cbr " + r.status);
+  const v = Number((await r.json()).Valute.EUR.Value);
+  if (!(v > 60 && v < 150)) throw new Error("cbr: странный курс " + v);
+  return v;
+}
+async function fetchTbank() {
+  const r = await fetch("https://api.tbank.ru/v1/currency_rates?from=EUR&to=RUB", { headers: { "User-Agent": "Mozilla/5.0", "Accept": "application/json" } });
+  if (!r.ok) throw new Error("tbank " + r.status);
+  const rates = ((await r.json()).payload || {}).rates || [];
+  const x = rates.find(t => t.category === "DebitCardsTransfers" && t.fromCurrency && t.fromCurrency.name === "EUR" && t.toCurrency && t.toCurrency.name === "RUB");
+  if (!x || !(x.sell > 60 && x.sell < 150) || !(x.buy < x.sell)) throw new Error("tbank: нет курса карт");
+  return { sell: Number(x.sell), buy: Number(x.buy) };
+}
 async function fetchKurs() {
-  const r = await fetch("https://bankiros.ru/bank/tcs/currency/eur/moskva", { headers: { "User-Agent": "Mozilla/5.0 (ItalBridge bot)", "Accept-Language": "ru" }, cf: { cacheTtl: 600 } });
-  if (!r.ok) throw new Error("bankiros " + r.status);
-  const t = (await r.text()).replace(/<[^>]+>/g, " ").replace(/&nbsp;|\s+/g, " ");
-  const m = t.match(/Курсы «Т-Банка»[\s\S]{0,200}?EUR\s*([\d]{2,3}[.,]\d{1,2})\s+([\d]{2,3}[.,]\d{1,2})/);
-  if (!m) throw new Error("bankiros: блок не найден");
-  const buy = parseFloat(m[1].replace(",", ".")), sell = parseFloat(m[2].replace(",", "."));
-  if (!(sell > 60 && sell < 150 && buy < sell)) throw new Error("bankiros: странные числа " + buy + "/" + sell);
-  return { kurs: sell, buy, ts: Date.now(), src: "bankiros.ru · Т-Банк, продажа €" };
+  const cb = await fetchCbr();
+  try {
+    const t = await fetchTbank();
+    if (Math.abs(t.sell / cb - 1.05) < 0.08) return { kurs: t.sell, buy: t.buy, cb, ts: Date.now(), src: "api.tbank.ru · Т-Банк, карты и переводы" };
+    console.log("kurs: tbank далёк от ЦБ", t.sell, cb);
+  } catch (e) { console.log("kurs tbank", String(e)); }
+  return { kurs: Math.round(cb * 1.05 * 100) / 100, buy: null, cb, ts: Date.now(), src: "ЦБ × 1,05" };
 }
 async function getKurs(env, force = false) {
-  const c = await kvGet(env, "kurs:live");
+  const c = await kvGet(env, "kurs:live2");
   if (!force && c && Date.now() - c.ts < KURS_TTL) return c;
-  try { const k = await fetchKurs(); await kvPut(env, "kurs:live", k); return k; }
+  try { const k = await fetchKurs(); await kvPut(env, "kurs:live2", k); return k; }
   catch (e) { console.log("kurs", String(e)); return c ? { ...c, stale: true } : null; }
 }
 async function kursResponse(env) {
