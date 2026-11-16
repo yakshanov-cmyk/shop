@@ -320,6 +320,15 @@ def do_publish(key):
     api("/api/published", {"key": key, "post": n})
     tg("editMessageReplyMarkup", chat_id=d["chat"], message_id=d["msg"], reply_markup={"inline_keyboard": [[{"text": f"✅ Опубликовано №{n}", "url": f"https://t.me/buyitru/{n}"}]]})
     log("published", n)
+    # дубль в сообщество ВКонтакте (если задан секрет VK_TOKEN)
+    if os.environ.get("VK_TOKEN"):
+        try:
+            import vk as vkmod
+            vid = vkmod.post(os.environ["VK_TOKEN"], vkmod.tg_to_vk(d["html"]), vkmod.tg_file(BOT, d["file_id"]))
+            log("vk", vid)
+        except Exception as e:
+            log("vk error", str(e)[:200])
+            tg("sendMessage", chat_id=OWNER, text=f"Пост №{n} вышел в Telegram, но в ВК не опубликовался ({str(e)[:100]}).")
     # каталог и навигатор
     try:
         git("pull", "-q", "--rebase", "origin", "main")
