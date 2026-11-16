@@ -181,7 +181,13 @@ button:disabled { opacity: .45; cursor: default; }
 <input id="name" type="text" placeholder="Анна, +7 900 000-00-00">
 <div class="err" id="err">Заполните товар, город и контакт.</div>
 <button id="send">Отправить заявку менеджеру</button>
-<p class="note">Откроется чат с менеджером с готовым текстом заявки — останется нажать «Отправить». Фото товара можно приложить там же.</p>
+<p class="note" id="sendNote">Откроется чат с менеджером с готовым текстом заявки — останется нажать «Отправить». Фото товара можно приложить там же.</p>
+<div id="vkBox" hidden style="margin-top:12px">
+<p class="note" style="margin-top:0">✅ Текст заявки скопирован. Откройте сообщения сообщества, вставьте текст и отправьте — менеджер ответит там же.</p>
+<textarea id="vkText" readonly rows="7" style="width:100%;box-sizing:border-box;font:inherit;font-size:14px;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text)"></textarea>
+<a id="vkOpen" class="postlink" target="_blank" rel="noopener" href="https://vk.me/buyitru" style="display:block;margin-top:10px;font-size:16px;font-weight:600">💬 Открыть сообщения ItalBridge в ВК →</a>
+<a id="tgAlt" class="postlink" target="_blank" rel="noopener" href="#" style="display:block;margin-top:8px">или написать менеджеру в Telegram</a>
+</div>
 </section>
 
 <section class="card">
@@ -527,6 +533,18 @@ fetch(KURS_URL, kursCtl ? { signal: kursCtl.signal } : {}).then(r => r.ok ? r.js
 if (product.post || product.eur) { showProduct(product); setTab("calc"); }
 else setTab("catalog");
 
+/* ---------- откуда открыли: Telegram или ВК/браузер ---------- */
+const IN_TG = !!(tg && tg.initData);
+const VK_MODE = !IN_TG || new URLSearchParams(location.search).get("src") === "vk";
+const VK_CHAT = "https://vk.me/buyitru";
+if (VK_MODE) {
+  $("send").textContent = "Отправить заявку в сообщения ВК";
+  $("sendNote").textContent = "Текст заявки скопируется — останется вставить его в сообщения сообщества ItalBridge ВКонтакте. Фото вещи можно приложить там же.";
+}
+function copyText(t) {
+  const fallback = () => { const a = $("vkText"); a.focus(); a.select(); try { document.execCommand("copy"); } catch (e) {} };
+  try { if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(t).catch(fallback); else fallback(); } catch (e) { fallback(); }
+}
 $("send").addEventListener("click", () => {
 const item = $("item").value.trim(), city = $("city").value.trim(), name = $("name").value.trim();
 if (!item || !city || !name) { $("err").style.display = "block"; return; }
@@ -536,6 +554,13 @@ if (last) lines.push("💶 Цена: " + last.eur + " € (≈ " + rub(last.pric
 if ($("size").value.trim()) lines.push("📏 Размер/цвет: " + $("size").value.trim());
 lines.push("🏙 Город: " + city, "👤 Контакт: " + name);
 const url = "https://t.me/" + CONFIG.MANAGER + "?text=" + encodeURIComponent(lines.join("\n"));
+if (VK_MODE) {
+  const text = lines.join("\n");
+  $("vkText").value = text; $("tgAlt").href = url; $("vkBox").hidden = false;
+  copyText(text);
+  $("vkBox").scrollIntoView({ behavior: "smooth", block: "center" });
+  return;
+}
 if (tg && tg.openTelegramLink) tg.openTelegramLink(url);
 else window.open(url, "_blank");
 });
