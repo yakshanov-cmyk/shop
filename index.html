@@ -303,6 +303,15 @@ $("eur").addEventListener("input", calc);
 $("cat").addEventListener("change", calc);
 
 /* ---------- товар из поста ---------- */
+// Строка «Товар» в заявке: бренд и название + номер поста; ссылку на Telegram — только для заявок из Telegram
+function productLabel(p) {
+  let i = p.info;
+  try { if (!i && typeof ALL_ITEMS !== "undefined") i = ALL_ITEMS.find(x => String(x.post) === String(p.post)); } catch (e) {}
+  const vk = !(tg && tg.initData) || new URLSearchParams(location.search).get("src") === "vk";
+  const base = i ? i.brand + " — " + i.title + " (пост №" + p.post + ")" : "Товар из поста №" + p.post;
+  return vk ? base : base + " https://t.me/" + CONFIG.CHANNEL + "/" + p.post;
+}
+function setItemLabel(p) { const v = productLabel(p); $("item").value = v; $("item").dataset.auto = v; }
 function showProduct(p) {
   product = p;
   productKurs = kursNow(p);
@@ -321,12 +330,12 @@ function showProduct(p) {
     sc.setAttribute("data-width", "100%");
     sc.setAttribute("data-userpic", "false");
     $("post").appendChild(sc);
-    $("item").value = "Товар из поста https://t.me/" + CONFIG.CHANNEL + "/" + p.post;
+    setItemLabel(p);
     $("postlink").href = "https://t.me/" + CONFIG.CHANNEL + "/" + p.post;
     $("postlink").hidden = false;
   }
   if (p.post && p.info) {
-    $("item").value = "Товар из поста https://t.me/" + CONFIG.CHANNEL + "/" + p.post;
+    setItemLabel(p);
     $("postlink").href = "https://t.me/" + CONFIG.CHANNEL + "/" + p.post;
     $("postlink").hidden = false;
   }
@@ -546,6 +555,7 @@ function copyText(t) {
   try { if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(t).catch(fallback); else fallback(); } catch (e) { fallback(); }
 }
 $("send").addEventListener("click", () => {
+if (product && product.post && $("item").value === $("item").dataset.auto) setItemLabel(product); // каталог мог догрузиться позже
 const item = $("item").value.trim(), city = $("city").value.trim(), name = $("name").value.trim();
 if (!item || !city || !name) { $("err").style.display = "block"; return; }
 $("err").style.display = "none";
