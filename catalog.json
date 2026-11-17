@@ -1,6 +1,24 @@
 {
- "updated": "2026-11-16",
+ "updated": "2026-11-17",
  "items": [
+  {
+   "post": 13514,
+   "brand": "Dolce&Gabbana",
+   "title": "детские кеды",
+   "price": 11400,
+   "old": null,
+   "disc": null,
+   "eur": 99,
+   "oldEur": null,
+   "c": "2",
+   "k": 95.75,
+   "cat": "обувь",
+   "men": false,
+   "sale": false,
+   "date": "2026-11-17",
+   "img": "img/13514.jpg",
+   "f": 2
+  },
   {
    "post": 13512,
    "brand": "Piquadro",
