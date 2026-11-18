@@ -2,24 +2,6 @@
  "updated": "2026-11-18",
  "items": [
   {
-   "post": 13516,
-   "brand": "Balmain",
-   "title": "сумка",
-   "price": 40300,
-   "old": 97700,
-   "disc": 59,
-   "eur": 350,
-   "oldEur": 850,
-   "c": "1",
-   "k": 95.75,
-   "cat": "сумки",
-   "men": false,
-   "sale": true,
-   "date": "2026-11-18",
-   "img": "img/13516.jpg",
-   "f": 2
-  },
-  {
    "post": 13517,
    "brand": "Gucci",
    "title": "кроссовки унисекс",
@@ -35,6 +17,24 @@
    "sale": false,
    "date": "2026-11-18",
    "img": "img/13517.jpg",
+   "f": 2
+  },
+  {
+   "post": 13516,
+   "brand": "Balmain",
+   "title": "сумка",
+   "price": 40300,
+   "old": 97700,
+   "disc": 59,
+   "eur": 350,
+   "oldEur": 850,
+   "c": "1",
+   "k": 95.75,
+   "cat": "сумки",
+   "men": false,
+   "sale": true,
+   "date": "2026-11-18",
+   "img": "img/13516.jpg",
    "f": 2
   },
   {
