@@ -2,6 +2,24 @@
  "updated": "2026-11-21",
  "items": [
   {
+   "post": 13553,
+   "brand": "Dolce Gabbana",
+   "title": "новинка",
+   "price": 52400,
+   "old": null,
+   "disc": null,
+   "eur": 460,
+   "oldEur": null,
+   "c": "1",
+   "k": 94.86,
+   "cat": "одежда",
+   "men": false,
+   "sale": false,
+   "date": "2026-11-21",
+   "img": "img/13553.jpg",
+   "f": 2
+  },
+  {
    "post": 13552,
    "brand": "Dolce Gabbana",
    "title": "новинка",
