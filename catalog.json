@@ -2,6 +2,24 @@
  "updated": "2026-11-23",
  "items": [
   {
+   "post": 13556,
+   "brand": "Baldinini",
+   "title": "обувь",
+   "price": 26800,
+   "old": null,
+   "disc": null,
+   "eur": 235,
+   "oldEur": null,
+   "c": "2",
+   "k": 94.86,
+   "cat": "обувь",
+   "men": false,
+   "sale": false,
+   "date": "2026-11-23",
+   "img": "img/13556.jpg",
+   "f": 2
+  },
+  {
    "post": 13555,
    "brand": "Baldinini",
    "title": "обувь",
