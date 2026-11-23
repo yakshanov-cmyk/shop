@@ -1,6 +1,24 @@
 {
- "updated": "2026-11-21",
+ "updated": "2026-11-23",
  "items": [
+  {
+   "post": 13555,
+   "brand": "Baldinini",
+   "title": "обувь",
+   "price": 20400,
+   "old": null,
+   "disc": null,
+   "eur": 179,
+   "oldEur": null,
+   "c": "2",
+   "k": 94.86,
+   "cat": "обувь",
+   "men": false,
+   "sale": false,
+   "date": "2026-11-23",
+   "img": "img/13555.jpg",
+   "f": 2
+  },
   {
    "post": 13554,
    "brand": "Dolce Gabbana",
