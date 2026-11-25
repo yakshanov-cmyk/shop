@@ -1,6 +1,24 @@
 {
- "updated": "2026-11-23",
+ "updated": "2026-11-25",
  "items": [
+  {
+   "post": 13560,
+   "brand": "Luisa Spagnoli",
+   "title": "новинка",
+   "price": 24400,
+   "old": null,
+   "disc": null,
+   "eur": 215,
+   "oldEur": null,
+   "c": "1",
+   "k": 94.38,
+   "cat": "одежда",
+   "men": false,
+   "sale": false,
+   "date": "2026-11-25",
+   "img": "img/13560.jpg",
+   "f": 2
+  },
   {
    "post": 13559,
    "brand": "Baldinini",
