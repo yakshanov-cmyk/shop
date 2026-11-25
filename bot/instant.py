@@ -62,7 +62,7 @@ def download(file_id, path):
     fp = tg("getFile", file_id=file_id)["file_path"]
     r = requests.get(f"https://api.telegram.org/file/bot{BOT}/{fp}", timeout=60)
     r.raise_for_status()
-    open(p, "wb").write(r.content)
+    open(path, "wb").write(r.content)
     return path
 
 
@@ -184,7 +184,7 @@ def build_caption(a, price, old, disc):
     if a.get("size"):
         lines.append(f"📏 Размер: {esc(a['size'])}")
     elif a.get("sized"):
-        lines.append(f"📏 Размеры — уточняйте у менеджере @{MANAGER}")
+        lines.append(f"📏 Размеры — уточняйте у менеджера @{MANAGER}")
     lines += ["", "🇮🇹 Оригинал из Италии · заказ — кнопкой под постом 👇"]
     tags = [f"#{a['brand_tag']}", f"#{a['category']}"] + (["#мужское"] if a.get("men") else []) + (["#скидки"] if old else []) + [price_tag(price)]
     lines.append(" ".join(tags))
@@ -317,14 +317,17 @@ def do_publish(key):
         tg("editMessageReplyMarkup", chat_id=d["chat"], message_id=d["msg"], reply_markup={"inline_keyboard": [[{"text": "⌛ Устарел — не опубликован", "callback_data": "noop"}]]})
         return
     if not d.get("file_id"):
-        # текстовый черновик (пост про курс и т.п.) — публикуем обычным сообщением, без каталога и навигатора
+        # текстовый черновик (пост про курс) — публикуем обычным сообщением, без каталога и навигатора
         res = tg("sendMessage", chat_id=CHANNEL, text=d["html"], parse_mode="HTML", disable_web_page_preview=True)
-        n = res["updateMessageReplyMarkup", chat_id=d["chat"], message_id=d["msg"], reply_markup={"inline_keyboard": [[{"text": f"✅ Опубликовано №{n}", "url": f"https://t.me/buyitru/{n}"}]]})
+        n = res["message_id"]
+        api("/api/published", {"key": key, "post": n})
+        tg("editMessageReplyMarkup", chat_id=d["chat"], message_id=d["msg"], reply_markup={"inline_keyboard": [[{"text": f"✅ Опубликовано №{n}", "url": f"https://t.me/buyitru/{n}"}]]})
         log("published text", n)
         return
     btn = lambda sa: {"inline_keyboard": [[{"text": "💶 Цена и заказ", "url": f"https://t.me/ItalBridgeBot/shop?startapp={sa}"}]]}
     res = tg("sendPhoto", chat_id=CHANNEL, photo=d["file_id"], caption=d["html"], parse_mode="HTML", reply_markup=btn(d["startapp"]))
-    n = res["updateMessageReplyMarkup", chat_id=CHANNEL, message_id=n, reply_markup=btn(f"p{n}_" + d["startapp"]))
+    n = res["message_id"]
+    tg("editMessageReplyMarkup", chat_id=CHANNEL, message_id=n, reply_markup=btn(f"p{n}_" + d["startapp"]))
     api("/api/published", {"key": key, "post": n})
     tg("editMessageReplyMarkup", chat_id=d["chat"], message_id=d["msg"], reply_markup={"inline_keyboard": [[{"text": f"✅ Опубликовано №{n}", "url": f"https://t.me/buyitru/{n}"}]]})
     log("published", n)
